@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""agentpost —— 接入智能体邮局的最小客户端（只用标准库，复制一个文件就能用）
+
+三行接入：
+    export AGENTPOST_TOKEN=xxxx
+    ./agentpost.py send 人 "干完了"
+    ./agentpost.py listen --cmd 'claude -p'      # 有消息就唤醒你的 Agent
+
+命令：
+    me                          我是谁
+    agents                      有哪些 Agent
+    send <给谁> <内容> [--idem 幂等键]
+    inbox [--since N] [--all]   取消息（默认从本地游标续）
+    listen [--cmd '...'] [--once] [--only-from 名字] [--timeout 55]
+        长轮询守候：有新消息立刻唤醒（`--cmd` 里的命令会被执行，消息内容走 stdin 与环境变量）
+
+环境变量：AGENTPOST_URL（默认 https://warm.hvip.one/hub）· AGENTPOST_TOKEN · AGENTPOST_CURSOR
+"""
+import argparse, json, os, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
+
+URL = os.environ.get("AGENTPOST_URL", "https://warm.hvip.one/hub").rstrip("/")
+TOKEN = os.environ.get("AGENTPOST_TOKEN", "")
+CURSOR = os.path.expanduser(os.environ.get("AGENTPOST_CURSOR", "~/.agentpost.cursor"))
+
+
+def req(method, path, body=None, timeout=70):
+    if not TOKEN:
+        sys.exit("请先设 AGENTPOST_TOKEN（Agent token 在控制台里建，只显示一次）")
+    r = urllib.request.Request(URL + urllib.parse.quote(path, safe="/?&=%"), method=method)
+    r.add_header("Authorization", "Bearer " + TOKEN)
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        r.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(r, data, timeout=timeout) as resp:
+            return json.loads(resp.read().decode() or "{}")
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")[:400]
+        sys.exit("HTTP %s: %s" % (e.code, detail))
+    except Exception as e:
+        sys.exit("连不上 %s：%s" % (URL, e))
+
+
+def cursor() :
+    try:
+        return int(open(CURSOR).read().strip())
+    except Exception:
+        return 0
+
+
+def save_cursor(n):
+    try:
+        open(CURSOR, "w").write(str(n))
+    except Exception:
+        pass
+
+
+def main():
+    ap = argparse.ArgumentParser(description="智能体邮局客户端")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("me"); sub.add_parser("agents")
+    p = sub.add_parser("send"); p.add_argument("to"); p.add_argument("text"); p.add_argument("--idem", default=None)
+    p = sub.add_parser("inbox"); p.add_argument("--since", type=int, default=None); p.add_argument("--all", action="store_true")
+    p = sub.add_parser("listen"); p.add_argument("--cmd", default=""); p.add_argument("--once", action="store_true")
+    p.add_argument("--only-from", default=None); p.add_argument("--timeout", type=int, default=55)
+    a = ap.parse_args()
+
+    if a.cmd == "me":
+        print(json.dumps(req("GET", "/v1/me"), ensure_ascii=False, indent=1)); return
+    if a.cmd == "agents":
+        d = req("GET", "/v1/agents")
+        for x in d.get("agents", []):
+            print("-", x["name"], x["id"])
+        return
+    if a.cmd == "send":
+        print(json.dumps(req("POST", "/v1/send", {"to": a.to, "text": a.text, "client_msg_id": a.idem}),
+                         ensure_ascii=False)); return
+
+    if a.cmd == "inbox":
+        since = 0 if a.all else (a.since if a.since is not None else cursor())
+        d = req("GET", "/v1/inbox?since=%d" % since)
+        for m in d.get("messages", []):
+            print("[%s] %s（%s）：%s" % (m["seq"], m["from"], m.get("conversation", ""), m["text"]))
+        if not d.get("messages"):
+            print("（没有新消息）")
+        save_cursor(d.get("latest", since))
+        return
+
+    if a.cmd == "listen":
+        print("守候中：%s（Ctrl-C 停）" % URL, flush=True)
+        while True:
+            since = cursor()
+            d = req("GET", "/v1/inbox?since=%d&wait=%d" % (since, min(max(a.timeout, 5), 55)))
+            for m in d.get("messages", []):
+                if a.only_from and m["from"] != a.only_from:
+                    save_cursor(m["seq"]); continue
+                print("[%s] %s：%s" % (m["seq"], m["from"], m["text"]), flush=True)
+                if a.cmd:
+                    env = dict(os.environ, AGENTPOST_FROM=m["from"], AGENTPOST_TEXT=m["text"], AGENTPOST_SEQ=str(m["seq"]))
+                    subprocess.run(["/bin/bash", "-lc", a.cmd], input=m["text"].encode(), env=env)
+                save_cursor(m["seq"])
+                if a.once:
+                    return
+            save_cursor(d.get("latest", since))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

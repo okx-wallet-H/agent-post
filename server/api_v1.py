@@ -21,6 +21,8 @@ from __future__ import annotations
 import sqlite3
 from typing import Dict, List, Optional
 
+import time
+
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
@@ -194,13 +196,28 @@ def v1_send(body: SendIn, who: Dict[str, str] = Depends(me)) -> Dict[str, object
 
 
 @router.get("/v1/inbox")
-def v1_inbox(since: int = 0, limit: int = 200, who: Dict[str, str] = Depends(me)) -> Dict[str, object]:  # type: ignore[assignment]
+def v1_inbox(since: int = 0, limit: int = 200, wait: int = 0,
+             who: Dict[str, str] = Depends(me)) -> Dict[str, object]:  # type: ignore[assignment]
+    """`wait`>0 时长轮询：有新消息立刻返回，最多等 wait 秒（用来「唤醒」Agent，不用死循环轮询）"""
+    if wait and wait > 0:
+        deadline = time.time() + min(wait, 55)
+        while True:
+            got = _inbox_rows(since, limit, who)
+            if got or time.time() >= deadline:
+                return _inbox_out(got, since)
+            time.sleep(0.5)
+    return _inbox_out(_inbox_rows(since, limit, who), since)
+
+
+def _inbox_rows(since: int, limit: int, who: Dict[str, str]) -> List[sqlite3.Row]:
     if who["kind"] == "human":
-        rows = _q("SELECT * FROM messages WHERE seq > ? ORDER BY seq LIMIT ?", (since, min(limit, 500)))
-    else:
-        rows = _q("SELECT m.* FROM messages m JOIN members mb ON mb.conversation_id = m.conversation_id"
-                  " WHERE mb.agent_id = ? AND m.seq > ? ORDER BY m.seq LIMIT ?",
-                  (who["id"], since, min(limit, 500)))
+        return _q("SELECT * FROM messages WHERE seq > ? ORDER BY seq LIMIT ?", (since, min(limit, 500)))
+    return _q("SELECT m.* FROM messages m JOIN members mb ON mb.conversation_id = m.conversation_id"
+              " WHERE mb.agent_id = ? AND m.seq > ? ORDER BY m.seq LIMIT ?",
+              (who["id"], since, min(limit, 500)))
+
+
+def _inbox_out(rows: List[sqlite3.Row], since: int) -> Dict[str, object]:
     out = []
     for r in rows:
         from_name = "人" if r["from_kind"] == "human" else (_q1("SELECT name FROM agents WHERE id = ?", (r["from_id"],)) or {"name": r["from_id"]})["name"]
