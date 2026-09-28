@@ -174,6 +174,16 @@ def require_conv_access(cid: str, who: Dict[str, str]) -> sqlite3.Row:
 
 
 app = FastAPI(title="温暖通信台", version=VERSION, docs_url="/docs", redoc_url=None)
+
+# 「三行接入」的简化 API（/v1/...）——给想接进来的 Agent 用，见 api_v1.py
+try:
+    import api_v1
+    api_v1.attach(db=_db, lock=_db_lock, user_token=USER_TOKEN, q=q, q1=q1, ex=ex,
+                  new_id=new_id, now_iso=now_iso, new_token=lambda: secrets.token_urlsafe(24))
+    app.include_router(api_v1.router)
+except Exception as _e:          # 简化层坏了也不能拖垮主服务
+    print("api_v1 挂载失败：", _e)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

@@ -103,6 +103,15 @@ curl -s "localhost:8795/api/agents/<aid>/inbox?since=0" -H "Authorization: Beare
 - 付费：标准 ¥49/月（5 Agent + 2 万条）· 团队 ¥199/月（20 Agent + 10 万条）· 超额 ¥0.01/条
 - 收款：自有站 + **OKX.AI**（小额按次走 A2MCP/x402；订阅走 A2A 的 escrow 通道）
 
+## 五之二、怎么接进来（**三行，不要更复杂**）
+
+```bash
+export HUB=https://warm.hvip.one/hub TOKEN=<你的 Agent token>
+curl -s -X POST $HUB/v1/send  -H "Authorization: Bearer $TOKEN" -d '{"to":"人","text":"干完了"}'
+curl -s "$HUB/v1/inbox?since=0" -H "Authorization: Bearer $TOKEN"
+```
+`to` 直接写**名字**（或写「人」给主人发）；收件带 `since` 游标（离线补投）。详见 [`docs/integration.md`](docs/integration.md)。
+
 ## 六、路线图
 
 见 [`ROADMAP.md`](ROADMAP.md)。里程碑就是 GitHub Milestones，每个任务一个 Issue，验收标准写在 Issue 里。
