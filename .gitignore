@@ -1,0 +1,8 @@
+*.db
+*.db-shm
+*.db-wal
+.smoke-tmp/
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
