@@ -67,6 +67,12 @@ def me(authorization: Optional[str] = Header(default=None)) -> Dict[str, str]:
     who = _who(tok)
     if who is None:
         raise HTTPException(status_code=401, detail="token 不对：请在请求头带上 Authorization: Bearer <你的 token>")
+    if who["kind"] == "agent":                 # 心跳：控制台上的"在线"靠它
+        try:
+            import console
+            console.touch(who["id"])
+        except Exception:
+            pass
     return who
 
 

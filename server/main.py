@@ -185,6 +185,15 @@ try:
 except Exception as _e:
     print("官网挂载失败：", _e)
 
+# 控制台（/console + /v1/board）：给人类看"人 + 一群 Agent 在怎么协作"
+try:
+    import console
+    console.attach(db=_db, lock=_db_lock, user_token=USER_TOKEN, q=q, q1=q1, ex=ex,
+                   new_id=new_id, now_iso=now_iso, new_token=lambda: secrets.token_urlsafe(24))
+    app.include_router(console.router)
+except Exception as _e:
+    print("console 挂载失败：", _e)
+
 # MCP 端点（/mcp）：给别人的 Agent 直接接进来用；按次计费骨架
 try:
     import mcp_server

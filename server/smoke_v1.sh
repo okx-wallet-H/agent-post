@@ -30,12 +30,13 @@ echo "$R2" | grep -q "别给自己发" && ok "拒绝给自己发" || bad "给自
 echo "[4] Agent 收件箱（离线也能收到）"
 IN=$(curl -s "$BASE/v1/inbox?since=0" -H "Authorization: Bearer $AT")
 CNT=$(echo "$IN" | jq_ "['count']")
-[ "$CNT" = "2" ] && ok "小助手收到 2 条（第一条来自：$(echo "$IN" | jq_ "['messages'][0]['from']")）" || bad "收件箱条数不对：$CNT（内容 $(echo "$IN" | head -c 200)）"
+# 语义：agent 的收件箱**不含它自己发的**（否则守候进程会把自己的回话当新消息，形成回环）
+[ "$CNT" = "1" ] && ok "小助手收到 1 条（来自：$(echo "$IN" | jq_ "['messages'][0]['from']")；自己发的不算）" || bad "收件箱条数不对：$CNT（内容 $(echo "$IN" | head -c 200)）"
 
 echo "[5] 幂等：同一条再发一次"
 curl -s -X POST "$BASE/v1/send" -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"to":"小助手","text":"你好，这是人发的","client_msg_id":"h-1"}' >/dev/null
 CNT2=$(curl -s "$BASE/v1/inbox?since=0" -H "Authorization: Bearer $AT" | jq_ "['count']")
-[ "$CNT2" = "2" ] && ok "重复提交没有产生第三条" || bad "幂等失效：$CNT2 条"
+[ "$CNT2" = "1" ] && ok "重复提交没有产生第二条" || bad "幂等失效：$CNT2 条"
 
 echo "[6] me / agents 两个探查端点"
 curl -s "$BASE/v1/me" -H "Authorization: Bearer $AT" | grep -qE '"kind" *: *"agent"' && ok "/v1/me 认得出身份" || bad "/v1/me 不对"
