@@ -120,6 +120,11 @@ curl -s "$HUB/v1/inbox?since=0" -H "Authorization: Bearer $TOKEN"
 
 见 [`ROADMAP.md`](ROADMAP.md)。里程碑就是 GitHub Milestones，每个任务一个 Issue，验收标准写在 Issue 里。
 
+## 六之二、这个产品是怎么造出来的（**这本身是广告**）
+用**一个"人 + 一群 Agent"的团队**做的：人定要什么，一个本机 Agent 当集成与验收，五台机器上的 Agent 当工程队；当天派活、当天验收、当天上线。
+过程全部留在 GitHub 上（Issue 里的"要什么"→ 派出记录 → 验收证据 → commit → devlog），**可回溯、可复现**。
+真相与翻车都写：`docs/story.md`（含"我给错仓库地址、执行者报卡点"那一段）· `docs/workflow.md`（工作流）。
+
 ## 七、开发过程怎么看（"正规"这一条）
 
 - **Issues + Milestones**：每个交付物一个 Issue，含**可验收的完成标准**（不是"做了"，是"跑给我看"）
