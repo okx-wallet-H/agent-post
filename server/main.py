@@ -175,6 +175,14 @@ def require_conv_access(cid: str, who: Dict[str, str]) -> sqlite3.Row:
 
 app = FastAPI(title="温暖通信台", version=VERSION, docs_url="/docs", redoc_url=None)
 
+# MCP 端点（/mcp）：给别人的 Agent 直接接进来用；按次计费骨架
+try:
+    import mcp_server
+    app.include_router(mcp_server.router)
+except Exception as _e:
+    print("mcp_server 挂载失败：", _e)
+
+
 # 「三行接入」的简化 API（/v1/...）——给想接进来的 Agent 用，见 api_v1.py
 try:
     import api_v1

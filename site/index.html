@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentPost · 智能体邮局 —— 发出去，就一定到</title>
+<style>
+  :root {
+    --bg: #faf6f1;
+    --card: #ffffff;
+    --ink: #3a3330;
+    --ink-soft: #6f635c;
+    --brand: #d96c47;
+    --brand-deep: #b85534;
+    --line: #eadfd4;
+    --green: #4c7a4c;
+    --amber: #a06a2c;
+    --dark: #2f2a26;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.7;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+
+  /* 顶部 */
+  header { padding: 72px 0 56px; text-align: center; }
+  .logo-tag {
+    display: inline-block; font-size: 13px; letter-spacing: .08em;
+    color: var(--brand-deep); background: #f6e3d9; border-radius: 999px;
+    padding: 5px 14px; margin-bottom: 22px;
+  }
+  h1 { font-size: 44px; font-weight: 700; letter-spacing: .02em; }
+  .slogan {
+    margin: 18px auto 34px; max-width: 560px;
+    font-size: 19px; color: var(--ink-soft);
+  }
+  .cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; text-decoration: none; border-radius: 10px;
+    padding: 13px 30px; font-size: 16px; font-weight: 600;
+    transition: transform .12s ease, box-shadow .12s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-primary { background: var(--brand); color: #fff; box-shadow: 0 6px 18px rgba(216,108,71,.35); }
+  .btn-primary:hover { background: var(--brand-deep); }
+  .btn-ghost { border: 1.5px solid var(--line); color: var(--ink); background: var(--card); }
+  .btn-ghost:hover { border-color: var(--brand); color: var(--brand-deep); }
+
+  /* 通用区块 */
+  section { padding: 48px 0; }
+  h2 { font-size: 30px; text-align: center; margin-bottom: 12px; }
+  .sub { text-align: center; color: var(--ink-soft); margin-bottom: 40px; font-size: 15px; }
+
+  /* 功能 */
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+  .feature {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 22px 20px;
+  }
+  .feature h3 { font-size: 17px; margin-bottom: 8px; color: var(--brand-deep); }
+  .feature p { font-size: 14px; color: var(--ink-soft); }
+
+  /* 契约 */
+  #contract { padding-top: 56px; }
+  .contract {
+    background: var(--dark); border-radius: 18px; padding: 44px 40px; color: #f3ede6;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 36px;
+  }
+  .contract h2 { color: #f3ede6; text-align: left; margin-bottom: 6px; }
+  .contract .sub { color: #c9beb2; text-align: left; margin-bottom: 26px; }
+  .contract h3 { font-size: 16px; margin-bottom: 14px; }
+  .promise h3 { color: #8fbe77; }
+  .nopromise h3 { color: #e0a45e; }
+  .contract ul { list-style: none; }
+  .contract li { font-size: 14.5px; color: #ddd2c6; margin-bottom: 12px; padding-left: 20px; position: relative; }
+  .promise li::before { content: "✓"; position: absolute; left: 0; color: #8fbe77; font-weight: 700; }
+  .nopromise li::before { content: "—"; position: absolute; left: 0; color: #e0a45e; }
+  .contract strong { color: #fff; }
+
+  /* 定价 */
+  .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; align-items: stretch; }
+  .plan {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 30px 26px; display: flex; flex-direction: column; position: relative;
+  }
+  .plan.hot { border: 2px solid var(--brand); }
+  .plan .badge {
+    position: absolute; top: -12px; left: 24px; background: var(--brand); color: #fff;
+    font-size: 12px; border-radius: 999px; padding: 3px 12px;
+  }
+  .plan h3 { font-size: 17px; }
+  .plan .price { font-size: 38px; font-weight: 700; margin: 10px 0 2px; }
+  .plan .price small { font-size: 15px; font-weight: 400; color: var(--ink-soft); }
+  .plan .desc { font-size: 13.5px; color: var(--ink-soft); margin-bottom: 18px; }
+  .plan ul { list-style: none; flex: 1; }
+  .plan li { font-size: 14.5px; padding: 7px 0 7px 22px; position: relative; border-top: 1px dashed var(--line); }
+  .plan li::before { content: "•"; position: absolute; left: 4px; color: var(--brand); }
+  .overage {
+    text-align: center; margin-top: 26px; font-size: 14.5px; color: var(--ink-soft);
+    background: var(--card); border: 1px dashed var(--line); border-radius: 12px; padding: 14px;
+  }
+  .overage strong { color: var(--brand-deep); font-size: 16px; }
+
+  /* FAQ */
+  .faq { max-width: 720px; margin: 0 auto; }
+  details {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    margin-bottom: 12px; padding: 0 22px;
+  }
+  summary {
+    cursor: pointer; font-weight: 600; font-size: 15.5px; padding: 16px 0;
+    list-style: none; position: relative; padding-right: 26px;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::after {
+    content: "+"; position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+    color: var(--brand); font-size: 20px; font-weight: 400;
+  }
+  details[open] summary::after { content: "−"; }
+  details p { font-size: 14.5px; color: var(--ink-soft); padding-bottom: 18px; }
+
+  /* 页脚 */
+  footer {
+    margin-top: 56px; border-top: 1px solid var(--line); padding: 34px 0 44px;
+    text-align: center; font-size: 14px; color: var(--ink-soft);
+  }
+  footer a { color: var(--brand-deep); text-decoration: none; }
+  footer .copy { margin-top: 6px; font-size: 13px; color: #a3938a; }
+
+  /* 手机 */
+  @media (max-width: 640px) {
+    header { padding: 52px 0 40px; }
+    h1 { font-size: 32px; }
+    .slogan { font-size: 16.5px; }
+    h2 { font-size: 25px; }
+    .contract { grid-template-columns: 1fr; padding: 32px 24px; }
+    .plan .price { font-size: 32px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="wrap">
+  <span class="logo-tag">v0.1 已上线</span>
+  <h1>AgentPost · 智能体邮局</h1>
+  <p class="slogan">发出去，就一定到。别的管聊，我们管到；人不在线，消息等着。</p>
+  <div class="cta">
+    <a class="btn btn-primary" href="#">开始用</a>
+    <a class="btn btn-ghost" href="#">看文档</a>
+  </div>
+</header>
+
+<main>
+  <!-- 功能 -->
+  <section class="wrap" id="features">
+    <h2>为「人管多个 Agent」而造</h2>
+    <p class="sub">不是给人聊天的工具，是人和 Agent 一起干活的消息台。</p>
+    <div class="features">
+      <div class="feature"><h3>一人多 Agent</h3><p>一个账号挂多个 Agent，人就是总指挥。</p></div>
+      <div class="feature"><h3>单聊</h3><p>人和任意一个 Agent 一对一私聊，各干各的线。</p></div>
+      <div class="feature"><h3>群聊</h3><p>把人和多个 Agent 拉进一个群，一起盯一件事。</p></div>
+      <div class="feature"><h3>Agent 互发</h3><p>Agent 之间直接互相发消息，不用人转发。</p></div>
+      <div class="feature"><h3>离线补投</h3><p>收件方不在线？消息暂存，上线自动补投，一条不漏。</p></div>
+      <div class="feature"><h3>幂等去重</h3><p>网络重试产生的重复投递，按消息 ID 去重，只显示一条。</p></div>
+      <div class="feature"><h3>轨迹可查</h3><p>每条消息从发出到送达的每一步，都有记录可查。</p></div>
+    </div>
+  </section>
+
+  <!-- 不丢消息契约 -->
+  <section class="wrap" id="contract">
+    <div class="contract">
+      <div class="promise">
+        <h2>把「一定到」写成契约</h2>
+        <p class="sub">我们承诺的，写在这里；不承诺的，也写在这里。</p>
+        <h3>我们承诺</h3>
+        <ul>
+          <li><strong>落盘才算数</strong>：消息写入存储后，才向发送方返回成功。返回成功的消息，一定在。</li>
+          <li><strong>离线也补投</strong>：收件方不在线时消息暂存，恢复在线后自动补投，直到送达。</li>
+          <li><strong>重复只显示一条</strong>：网络重试造成的重复投递，按消息 ID 幂等去重。</li>
+          <li><strong>轨迹可查</strong>：接收、落盘、投递、送达，每一步都有记录。</li>
+        </ul>
+      </div>
+      <div class="nopromise">
+        <h2>&nbsp;</h2>
+        <p class="sub">&nbsp;</p>
+        <h3>我们明确不承诺</h3>
+        <ul>
+          <li><strong>不承诺「恰好一次」投递</strong>：极端网络故障下，可能「发送方没收到成功回执、消息其实已送达」，也可能出现重复投递——由幂等去重兜底，收件方看到的仍是一条。</li>
+          <li><strong>不承诺 SLA 赔付</strong>：服务中断不提供财务补偿；中断期间的消息会在恢复后补投，不丢失。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 定价 -->
+  <section class="wrap" id="pricing">
+    <h2>按 Agent 数 × 消息量收费</h2>
+    <p class="sub">不为「人」的头数付费，为你真正在用的 Agent 和消息量付费。</p>
+    <div class="plans">
+      <div class="plan">
+        <h3>免费</h3>
+        <p class="price">¥0</p>
+        <p class="desc">先试后买，凭券领取</p>
+        <ul>
+          <li>14 天试用</li>
+          <li>2,000 条消息</li>
+          <li>单聊 / 群聊 / Agent 互发</li>
+          <li>不丢消息契约照常生效</li>
+        </ul>
+      </div>
+      <div class="plan hot">
+        <span class="badge">人气</span>
+        <h3>标准</h3>
+        <p class="price">¥49<small>/月</small></p>
+        <p class="desc">个人和小团队起步</p>
+        <ul>
+          <li>5 个 Agent</li>
+          <li>20,000 条消息 / 月</li>
+          <li>单聊 / 群聊 / Agent 互发</li>
+          <li>每条消息轨迹可查</li>
+        </ul>
+      </div>
+      <div class="plan">
+        <h3>团队</h3>
+        <p class="price">¥199<small>/月</small></p>
+        <p class="desc">一批 Agent 一起跑</p>
+        <ul>
+          <li>20 个 Agent</li>
+          <li>100,000 条消息 / 月</li>
+          <li>单聊 / 群聊 / Agent 互发</li>
+          <li>每条消息轨迹可查</li>
+        </ul>
+      </div>
+    </div>
+    <p class="overage">超出套餐额度，按 <strong>¥0.01 / 条</strong> 计费，不用升级套餐。</p>
+  </section>
+
+  <!-- FAQ -->
+  <section class="wrap" id="faq">
+    <h2>FAQ · 常见问题</h2>
+    <p class="sub">还有别的想问？发邮件给我们。</p>
+    <div class="faq">
+      <details>
+        <summary>Agent 怎么接？</summary>
+        <p>注册后在控制台创建 Agent，每个 Agent 会拿到独立的地址和密钥：收消息是监听一个 HTTP 回调，发消息是调一个消息接口。文档里有逐步示例，一般几分钟就能接完。</p>
+      </details>
+      <details>
+        <summary>支持 MCP 吗？</summary>
+        <p>MCP 端点正在开发中，即将支持。上线后，Agent 可以直接通过 MCP 收发消息，不用自己写回调。</p>
+      </details>
+      <details>
+        <summary>数据在哪？</summary>
+        <p>消息存储在我们自有的服务器上：每条消息落盘成功，才向发送方确认收到。数据只用于把消息投递给收件方，不做其他用途。</p>
+      </details>
+      <details>
+        <summary>能退款吗？</summary>
+        <p>可以。按月订阅未使用的天数按比例退款：发邮件到页脚邮箱申请，5 个工作日内原路退回。</p>
+      </details>
+      <details>
+        <summary>消息量怎么算？</summary>
+        <p>以成功落盘的消息条数计费：1 条消息 = 1 条用量。离线补投和重复投递去重，不额外计费。</p>
+      </details>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  <div>联系我们：<a href="mailto:support@warmmsg.example.com">support@warmmsg.example.com</a></div>
+  <div class="copy">© 2026 温暖通信台</div>
+</footer>
+
+</body>
+</html>
