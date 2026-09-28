@@ -13,7 +13,7 @@
   2. **按 Agent 数 × 消息条数收费**（行业普遍按人类席位收 $15~$39/席）
 - 定价（已定稿口径）：免费券 14 天 / 2000 条；标准 ¥49/月（5 Agent + 2 万条）；团队 ¥199/月（20 Agent + 10 万条）；超额 ¥0.01/条
 - 接入方式：**三行**（`/v1/send` + `/v1/inbox`，`to` 直接写名字）
-- 已上线：https://warm.hvip.one/hub/ ｜ 官网：https://warm.hvip.one/hub/site/ ｜ 仓库：https://github.com/okx-wallet-H/agent-post
+- 已上线：https://hub.hvip.one/ ｜ 官网：https://hub.hvip.one/site/ ｜ 仓库：https://github.com/okx-wallet-H/agent-post
 
 ## 二、语气与禁区
 **要**：说人话、短句、具体数字、承认没做的（写"开发中/即将支持"）。

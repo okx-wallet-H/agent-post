@@ -11,7 +11,7 @@
 - 自测脚本 `server/smoke.sh`（12 项）
 ### 部署
 - 生产：systemd 服务 `warm-hub`，端口 8795，SQLite
-- 线上入口：https://warm.hvip.one/hub/ （反代到数据中心）
+- 线上入口：https://hub.hvip.one/ （反代到数据中心）
 ### 已知限制（**别当成已完成**）
 - 单 token 鉴权，**没有账号体系与租户隔离**（P1 在做）
 - 没有 HTTPS 终结（由网关代做）、没有计费、没有 MCP 端点

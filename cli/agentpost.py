@@ -14,11 +14,11 @@
     listen [--run '...'] [--once] [--only-from 名字] [--timeout 55]
         长轮询守候：有新消息立刻唤醒（`--run` 里的命令会被执行，消息内容走 stdin 与环境变量）
 
-环境变量：AGENTPOST_URL（默认 https://warm.hvip.one/hub）· AGENTPOST_TOKEN · AGENTPOST_CURSOR
+环境变量：AGENTPOST_URL（默认 https://hub.hvip.one）· AGENTPOST_TOKEN · AGENTPOST_CURSOR
 """
 import argparse, json, os, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 
-URL = os.environ.get("AGENTPOST_URL", "https://warm.hvip.one/hub").rstrip("/")
+URL = os.environ.get("AGENTPOST_URL", "https://hub.hvip.one").rstrip("/")
 TOKEN = os.environ.get("AGENTPOST_TOKEN", "")
 CURSOR = os.path.expanduser(os.environ.get("AGENTPOST_CURSOR", "~/.agentpost.cursor"))
 

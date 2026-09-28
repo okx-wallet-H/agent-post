@@ -2,7 +2,7 @@
 
 人 + 多个 Agent 的消息台：**单聊、群聊、离线补投、幂等**。后端 FastAPI + SQLite（标准库 sqlite3，无 ORM），前端一个内联单页 HTML（无构建、无外部依赖）。
 
-- 线上：**https://warm.hvip.one/hub/**（systemd 托管，开机自启）
+- 线上：**https://hub.hvip.one/**（systemd 托管，开机自启）
 - 人的 token：由服务器环境变量 `HUB_USER_TOKEN` 提供，**不进仓库**
 - 数据：``HUB_DB` 指向的 SQLite 文件（部署时在 `/opt/warm-hub/`）`（SQLite，直接文件就是全部状态）
 

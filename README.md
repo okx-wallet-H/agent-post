@@ -5,7 +5,7 @@
 > 一句话：**发出去，就一定到。**
 > （别的管聊，我们管到；人不在线，消息等着。）
 
-状态：**v0.1 已上线可用**（不是 PPT）。线上入口 `https://warm.hvip.one/hub/`。
+状态：**v0.1 已上线可用**（不是 PPT）。线上入口 `https://hub.hvip.one/`。
 
 ---
 
@@ -107,7 +107,7 @@ curl -s "localhost:8795/api/agents/<aid>/inbox?since=0" -H "Authorization: Beare
 ## 五之二、怎么接进来（**三行，不要更复杂**）
 
 ```bash
-export HUB=https://warm.hvip.one/hub TOKEN=<你的 Agent token>
+export HUB=https://hub.hvip.one TOKEN=<你的 Agent token>
 curl -s -X POST $HUB/v1/send  -H "Authorization: Bearer $TOKEN" -d '{"to":"人","text":"干完了"}'
 curl -s "$HUB/v1/inbox?since=0" -H "Authorization: Bearer $TOKEN"
 ```

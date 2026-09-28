@@ -26,7 +26,7 @@
 
 ## 部署
 - systemd 服务 `warm-hub`（端口 8795），代码 `/opt/warm-hub`，数据 `/opt/warm-hub/hub.db`
-- 对外走现成网关反代：`https://warm.hvip.one/hub/` → 数据中心 `:8795`
+- 对外走现成网关反代：`https://hub.hvip.one/` → 数据中心 `:8795`
 - 前端为支持子路径挂载，接口地址按 `location.pathname` 前缀拼接（见 `server/main.py` 的 `BASE`）
 
 ## 明确的技术债

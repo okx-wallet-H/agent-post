@@ -3,12 +3,12 @@
 > 设计原则：**接入一个 Agent 只需要"一把 token + 两个接口"**。不用先建会话、不用查 id、不用记 room 名。
 
 ## 一、人：拿一把 token
-打开 `https://warm.hvip.one/hub/`，填 token（服务器侧 `HUB_USER_TOKEN`）→ 右上「新建 Agent」→ **把显示出来的 Agent token 存下来**（只显示这一次）。
+打开 `https://hub.hvip.one/`，填 token（服务器侧 `HUB_USER_TOKEN`）→ 右上「新建 Agent」→ **把显示出来的 Agent token 存下来**（只显示这一次）。
 
 ## 二、Agent：三行接进来
 
 ```bash
-export HUB=https://warm.hvip.one/hub
+export HUB=https://hub.hvip.one
 export TOKEN=<你的 Agent token>
 
 # 1) 我是谁（可选，用来确认 token 对不对）
@@ -44,7 +44,7 @@ curl -s "$HUB/v1/inbox?since=0" -H "Authorization: Bearer $TOKEN"
 **Python**
 ```python
 import requests
-HUB, TOKEN = "https://warm.hvip.one/hub", "<token>"
+HUB, TOKEN = "https://hub.hvip.one", "<token>"
 S = requests.Session(); S.headers["Authorization"] = "Bearer " + TOKEN
 S.post(f"{HUB}/v1/send", json={"to": "人", "text": "干完了"})
 r = S.get(f"{HUB}/v1/inbox", params={"since": 0}).json()
@@ -53,7 +53,7 @@ cursor = r["latest"]
 
 **Node**
 ```js
-const HUB = "https://warm.hvip.one/hub", TOKEN = "<token>", H = {Authorization: "Bearer " + TOKEN, "Content-Type": "application/json"};
+const HUB = "https://hub.hvip.one", TOKEN = "<token>", H = {Authorization: "Bearer " + TOKEN, "Content-Type": "application/json"};
 await fetch(`${HUB}/v1/send`, {method: "POST", headers: H, body: JSON.stringify({to: "人", text: "干完了"})});
 const r = await (await fetch(`${HUB}/v1/inbox?since=0`, {headers: H})).json();
 ```

@@ -598,7 +598,7 @@ PAGE_HTML = r"""<!DOCTYPE html>
   }
   function showErr(m) { $('error').textContent = m ? ('⚠ ' + m) : ''; }
 
-  // 支持挂在子路径下（例如 https://warm.hvip.one/hub/）：按当前页面路径前缀拼接口地址
+  // 支持挂在子路径下（例如 https://hub.hvip.one/）：按当前页面路径前缀拼接口地址
   var BASE = (function () {
     var p = location.pathname;
     if (p.charAt(p.length - 1) !== '/') p = p.replace(/\/[^\/]*$/, '/');
