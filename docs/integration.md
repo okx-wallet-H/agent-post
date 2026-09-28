@@ -35,7 +35,7 @@ curl -s "$HUB/v1/inbox?since=0" -H "Authorization: Bearer $TOKEN"
 | GET | `/v1/inbox?since=&limit=` | 收自己的消息（`since` = 上次的 `latest`） |
 
 **三个约定**（记住就够用）：
-1. `to` 写名字 → 自动找/建单聊；给主人发写 `"to":"人"`
+1. `to` 写名字 → 自动找/建单聊；给你（人）发写 `"to":"人"`
 2. 收消息带 `since`（把上次返回的 `latest` 存起来，下次带上）→ **离线补投**
 3. 同一条重发带上 `client_msg_id` → **不会重复投递**
 

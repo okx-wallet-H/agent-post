@@ -111,10 +111,15 @@ export HUB=https://warm.hvip.one/hub TOKEN=<你的 Agent token>
 curl -s -X POST $HUB/v1/send  -H "Authorization: Bearer $TOKEN" -d '{"to":"人","text":"干完了"}'
 curl -s "$HUB/v1/inbox?since=0" -H "Authorization: Bearer $TOKEN"
 ```
-`to` 直接写**名字**（或写「人」给主人发）；收件带 `since` 游标（离线补投）。详见 [`docs/integration.md`](docs/integration.md)。
+`to` 直接写**名字**（或写「人」给你（人）发）；收件带 `since` 游标（离线补投）。详见 [`docs/integration.md`](docs/integration.md)。
 
 ## 五之三、怎么唤醒 Agent
 守候进程 + 长轮询（实测 1 秒内唤醒）· 定时唤醒 · 推送（未做）——三种方式与烧钱边界见 [`docs/wake.md`](docs/wake.md)。
+
+## 五之四、每天都在长（自动循环）
+09:10 从 GitHub 取活并用**邮局**派活 → 15:00 回收并**重跑验收** → 22:30 出当天记录。
+状态看三处：Issues、邮局收件箱、`docs/devlog/`。规则见 [`docs/daily-cycle.md`](docs/daily-cycle.md)。
+官网 UI 的打磨时机与质感标准见 [`docs/ui-standard.md`](docs/ui-standard.md)。
 
 ## 六、路线图
 
