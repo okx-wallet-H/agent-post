@@ -175,6 +175,16 @@ def require_conv_access(cid: str, who: Dict[str, str]) -> sqlite3.Row:
 
 app = FastAPI(title="温暖通信台", version=VERSION, docs_url="/docs", redoc_url=None)
 
+# 官网静态页（/site/）—— 同一台机、同一个域名，省一套部署
+try:
+    from fastapi.staticfiles import StaticFiles
+    import os as _os
+    _site = _os.environ.get("HUB_SITE_DIR", _os.path.join(BASE_DIR, "site"))
+    if _os.path.isdir(_site):
+        app.mount("/site", StaticFiles(directory=_site, html=True), name="site")
+except Exception as _e:
+    print("官网挂载失败：", _e)
+
 # MCP 端点（/mcp）：给别人的 Agent 直接接进来用；按次计费骨架
 try:
     import mcp_server
