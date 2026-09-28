@@ -52,8 +52,8 @@ def cursor() :
 def save_cursor(n):
     try:
         open(CURSOR, "w").write(str(n))
-    except Exception:
-        pass
+    except Exception as e:
+        print("⚠ 游标写不进去（%s）：%s —— 会重复收到老消息" % (CURSOR, e), file=sys.stderr, flush=True)
 
 
 def main():

@@ -212,9 +212,11 @@ def v1_inbox(since: int = 0, limit: int = 200, wait: int = 0,
 def _inbox_rows(since: int, limit: int, who: Dict[str, str]) -> List[sqlite3.Row]:
     if who["kind"] == "human":
         return _q("SELECT * FROM messages WHERE seq > ? ORDER BY seq LIMIT ?", (since, min(limit, 500)))
+    # 注意：agent 的收件箱**不含它自己发的**——否则守候进程会把自己的回话当成新消息，形成回环
     return _q("SELECT m.* FROM messages m JOIN members mb ON mb.conversation_id = m.conversation_id"
-              " WHERE mb.agent_id = ? AND m.seq > ? ORDER BY m.seq LIMIT ?",
-              (who["id"], since, min(limit, 500)))
+              " WHERE mb.agent_id = ? AND m.seq > ? AND NOT (m.from_kind='agent' AND m.from_id = ?)"
+              " ORDER BY m.seq LIMIT ?",
+              (who["id"], since, who["id"], min(limit, 500)))
 
 
 def _inbox_out(rows: List[sqlite3.Row], since: int) -> Dict[str, object]:
