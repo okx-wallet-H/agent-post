@@ -167,7 +167,7 @@ def v1_send(body: SendIn, who: Dict[str, str] = Depends(me)) -> Dict[str, object
     if not text:
         raise HTTPException(status_code=400, detail="内容不能空")
     to = (body.to or "").strip()
-    if to in ("人", "human", "主人", "我"):
+    if to in ("人", "human", "老板", "我"):
         target_id, target_name = "human", "人"
     else:
         row = _find_agent(to)
