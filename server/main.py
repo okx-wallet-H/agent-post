@@ -24,7 +24,7 @@ from typing import Dict, List, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------- 配置
@@ -211,6 +211,215 @@ try:
 except Exception as _e:          # 简化层坏了也不能拖垮主服务
     print("api_v1 挂载失败：", _e)
 
+# ---------------------------------------------------------------- 多租户账号层（交付模块 accounts.py）
+# 挂载顺序：accounts → billing → metrics。都用上面的 try/except 惯例，坏了不拖垮主服务。
+
+# accounts.py 的端点内部用 `import main as _m` 取连接；main.py 被当脚本直接跑时
+# （python3 main.py —— smoke_v1 / smoke_wait / smoke_console 都这么起）模块名是 __main__，
+# `import main` 会另起一份 main（另一个 sqlite 连接）。先把它指回自己，保证同一个连接。
+try:
+    import sys as _sys
+
+    _sys.modules.setdefault("main", _sys.modules[__name__])
+except Exception as _e:
+    print("main 模块别名注册失败：", _e)
+
+TENANT_OK = False
+TENANT_AUTH = None
+
+try:
+    import accounts
+
+    db_init()                        # 基础表先建好（文件底部的 db_init 跑在这之后）；幂等
+    accounts.ensure_schema(_db)      # 幂等建表 + 给 agents / conversations 加 owner_account
+    app.include_router(accounts.router)
+    # 鉴权覆写：人总 token（HUB_USER_TOKEN）全权不变；账号 token → kind=human、id=账号
+    TENANT_AUTH = accounts.make_authenticate(_db, USER_TOKEN)
+    app.dependency_overrides[authenticate] = TENANT_AUTH
+    # 会话访问判定：人总 token 全可见；账号 / agent 只见自己账号名下的会话（越权 → 403）
+    require_conv_access = accounts.make_conv_access(_db)
+    TENANT_OK = True
+except Exception as _e:
+    print("accounts 挂载失败：", _e)
+
+try:
+    import billing
+
+    billing.attach(db=_db, lock=_db_lock, user_token=USER_TOKEN, q1=q1)
+    app.include_router(billing.router)
+except Exception as _e:
+    print("billing 挂载失败：", _e)
+
+try:
+    import metrics
+
+    metrics.attach(db=_db, lock=_db_lock, user_token=USER_TOKEN, q=q, q1=q1, ex=ex,
+                   new_id=new_id, now_iso=now_iso)
+    app.include_router(metrics.router)
+except Exception as _e:
+    print("metrics 挂载失败：", _e)
+
+
+# ---------------------------------------------------------------- 多租户隔离 + 计费卡口（接线）
+# 口径（写死在这，改口径改这里）：
+#   · 人总 token（HUB_USER_TOKEN，id = "human"）= 管理员：全权、不受限、不计费 —— 线上控制台靠它，别锁死
+#   · 账号 token（kind=human，id=acct_xxx）：只能看 / 操作本账号名下的 Agent、会话、消息
+#   · agent token：跟着它所属账号走（agents.owner_account）；越权 → 403
+#   · 旧数据（owner_account 为 NULL 或 accounts.py 的固定默认账号）：人总 token 年代的数据，
+#     不算任何租户、彼此可见、不计费 —— 这样线上老数据与老脚本（smoke_v1/wait/console）照旧跑
+
+ADMIN_ID = "human"
+DEFAULT_ACCOUNT_ID = "acct_default"        # accounts.py 里的固定默认账号（老数据都归它）
+LEGACY_OWNERS = (None, DEFAULT_ACCOUNT_ID)
+
+
+def is_admin(who: Optional[Dict[str, str]]) -> bool:
+    """人总 token —— 全权、不受限"""
+    return bool(who) and who["kind"] == "human" and who["id"] == ADMIN_ID
+
+
+def account_of(who: Optional[Dict[str, str]]) -> Optional[str]:
+    """调用方所属账号 id；管理员 / 旧数据 / accounts 没挂上 → None"""
+    if not who or not TENANT_OK:
+        return None
+    if who["kind"] == "human":
+        return None if who["id"] == ADMIN_ID else who["id"]
+    row = q1("SELECT owner_account FROM agents WHERE id = ?", (who["id"],))
+    return row["owner_account"] if row is not None else None
+
+
+def billable_account(who: Optional[Dict[str, str]]) -> Optional[str]:
+    """要计费的账号 id；管理员与旧数据 → None（不受限、不计量）"""
+    acct = account_of(who)
+    return None if acct in LEGACY_OWNERS else acct
+
+
+def owner_filter(who, col: str = "owner_account"):
+    """列表查询用的账号隔离条件 → (SQL 片段, 参数)"""
+    if is_admin(who) or not TENANT_OK:
+        return "", []
+    acct = account_of(who)
+    if acct is None:                       # 旧数据（人总 token 建的 Agent）：只看旧数据那一堆
+        return " AND (%s IS NULL OR %s = ?)" % (col, col), [DEFAULT_ACCOUNT_ID]
+    return " AND %s = ?" % col, [acct]
+
+
+def can_see_owner(owner: Optional[str], who) -> bool:
+    """owner_account = owner 的这一行，对该调用方可见吗"""
+    if not who or is_admin(who) or not TENANT_OK:
+        return True
+    acct = account_of(who)
+    if acct is None:
+        return owner in LEGACY_OWNERS
+    return owner == acct
+
+
+def owner_of_row(r) -> Optional[str]:
+    """取一行的 owner_account；没这列（accounts 没挂）时当 None"""
+    try:
+        return r["owner_account"]
+    except (IndexError, KeyError, TypeError):
+        return None
+
+
+def has_col(tbl: str, col: str) -> bool:
+    return col in [x[1] for x in q("PRAGMA table_info(%s)" % tbl)]
+
+
+class QuotaError(Exception):
+    """额度用尽 → HTTP 402，body 顶层就是 {"detail":"额度用尽", ...}"""
+
+    def __init__(self, info=None) -> None:
+        self.info = dict(info or {})
+        super().__init__("额度用尽")
+
+
+@app.exception_handler(QuotaError)
+def quota_error_handler(request: Request, exc: QuotaError) -> JSONResponse:
+    body = {"detail": "额度用尽"}
+    body.update({k: v for k, v in exc.info.items() if k != "detail"})
+    return JSONResponse(status_code=402, content=body)
+
+
+def quota_guard(account_id: Optional[str], kind: str) -> None:
+    """账号维度额度检查（billing.check_quota）：管理员 / 旧数据（account_id=None）不受限；
+    不够就抛 QuotaError → 402。billing 没挂或自身出错时放行（先别把消息堵死）。"""
+    if not account_id:
+        return
+    try:
+        import billing as _b
+
+        ok, info = _b.check_quota(_db, account_id, kind)
+    except Exception as _e:
+        print("check_quota 出错（放行）：", _e)
+        return
+    if not ok:
+        raise QuotaError(info)
+
+
+def record_usage(account_id: Optional[str], kind: str, n: int = 1) -> None:
+    """按投递计费：投给 N 个成员就记 N 条（管理员 / 旧数据不记）"""
+    if not account_id:
+        return
+    try:
+        import billing as _b
+
+        with _db_lock:
+            _b.record_usage(_db, account_id, kind, n)
+    except Exception as _e:
+        print("record_usage 出错（忽略）：", _e)
+
+
+def resolve_token(token: str):
+    """账号 token → ("human", account_id)（accounts.resolve 要连接，这里包一层）；
+    accounts 没挂上就认不出来（返回 None）"""
+    if not TENANT_OK:
+        return None
+    return accounts.resolve(_db, token)
+
+
+def tenancy_context() -> Dict[str, object]:
+    """交给 api_v1 的那一套（api_v1.attach(tenancy=...)）"""
+    return {
+        "owner_filter": owner_filter,
+        "can_see_owner": can_see_owner,
+        "account_of": account_of,
+        "billable_account": billable_account,
+        "quota_guard": quota_guard,
+        "record_usage": record_usage,
+        "resolve_token": resolve_token,
+    }
+
+
+# api_v1 在上面就挂好了（那段不动），这里把账号/计费能力补进去：attach 是 dict update，可多次调
+try:
+    import api_v1 as _api_v1
+
+    _api_v1.attach(tenancy=tenancy_context())
+except Exception as _e:
+    print("api_v1 多租户接线失败：", _e)
+
+# billing 自带的鉴权只认"人总 token / agent token"（账号 token 会 401）；覆写成：
+# 账号 token → 用账号 id 查自己的用量 / 兑自己的券；发券收紧到只有管理员能发
+if TENANT_OK:
+    try:
+        import billing as _billing
+
+        def _billing_who(authorization: Optional[str] = Header(default=None)) -> Dict[str, str]:
+            who = TENANT_AUTH(authorization)  # type: ignore[operator]
+            acct = account_of(who)
+            return {"kind": who["kind"], "id": (acct or ADMIN_ID), "name": who["name"]}
+
+        def _billing_admin(who: Dict[str, str] = Depends(_billing_who)) -> Dict[str, str]:
+            if who["id"] != ADMIN_ID:
+                raise HTTPException(status_code=403, detail="发券只允许管理员（人总 token）")
+            return who
+
+        app.dependency_overrides[_billing._authenticate] = _billing_who
+        app.dependency_overrides[_billing._require_human] = _billing_admin
+    except Exception as _e:
+        print("billing 鉴权接线失败：", _e)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -240,18 +449,29 @@ def create_agent(body: AgentIn, who: Dict[str, str] = Depends(require_human)) ->
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="名字不能为空")
+    acct = billable_account(who)
+    quota_guard(acct, "agent")            # 账号维度卡口：超额 → 402（管理员不受限）
     aid = new_id("ag")
     token = secrets.token_urlsafe(24)
-    ex(
-        "INSERT INTO agents (id, name, token, created_at) VALUES (?,?,?,?)",
-        (aid, name, token, now_iso()),
-    )
+    if has_col("agents", "owner_account"):
+        ex(
+            "INSERT INTO agents (id, name, token, created_at, owner_account) VALUES (?,?,?,?,?)",
+            (aid, name, token, now_iso(), account_of(who)),
+        )
+    else:
+        ex(
+            "INSERT INTO agents (id, name, token, created_at) VALUES (?,?,?,?)",
+            (aid, name, token, now_iso()),
+        )
+    record_usage(acct, "agent", 1)
     return {"id": aid, "name": name, "token": token}
 
 
 @app.get("/api/agents")
 def list_agents(who: Dict[str, str] = Depends(authenticate)) -> Dict[str, object]:
-    rows = q("SELECT id, name, created_at FROM agents ORDER BY created_at, id")
+    frag, fargs = owner_filter(who)       # 账号 token 只看自己名下的 Agent
+    rows = q("SELECT id, name, created_at FROM agents WHERE 1=1%s ORDER BY created_at, id" % frag,
+             tuple(fargs))
     return {"agents": [dict(r) for r in rows]}
 
 
@@ -272,8 +492,12 @@ def create_conversation(
         if aid and aid not in members:
             members.append(aid)
     for aid in members:
-        if q1("SELECT 1 FROM agents WHERE id = ?", (aid,)) is None:
+        row = q1("SELECT id, owner_account FROM agents WHERE id = ?", (aid,)) \
+            if has_col("agents", "owner_account") else q1("SELECT id FROM agents WHERE id = ?", (aid,))
+        if row is None:
             raise HTTPException(status_code=400, detail="成员不存在：%s" % aid)
+        if not can_see_owner(owner_of_row(row), who):     # 多租户：不能把别人的 Agent 拉进自己的会话
+            raise HTTPException(status_code=403, detail="成员不在你的账号里：%s" % aid)
 
     kind = (body.kind or "").strip().lower()
     if kind not in ("dm", "group"):
@@ -281,7 +505,11 @@ def create_conversation(
 
     cid = new_id("cv")
     created = now_iso()
-    ex("INSERT INTO conversations (id, title, kind, created_at) VALUES (?,?,?,?)", (cid, title, kind, created))
+    if has_col("conversations", "owner_account"):          # 会话归属调用方账号（管理员为 NULL）
+        ex("INSERT INTO conversations (id, title, kind, created_at, owner_account) VALUES (?,?,?,?,?)",
+           (cid, title, kind, created, account_of(who)))
+    else:
+        ex("INSERT INTO conversations (id, title, kind, created_at) VALUES (?,?,?,?)", (cid, title, kind, created))
     for aid in members:
         ex("INSERT OR IGNORE INTO members (conversation_id, agent_id) VALUES (?,?)", (cid, aid))
     return {"id": cid, "title": title, "kind": kind, "members": members}
@@ -289,14 +517,16 @@ def create_conversation(
 
 @app.get("/api/conversations")
 def list_conversations(who: Dict[str, str] = Depends(authenticate)) -> Dict[str, object]:
+    frag, fargs = owner_filter(who, "c.owner_account")     # 账号隔离：只看自己账号名下的会话
     if who["kind"] == "human":
-        rows = q("SELECT id, title, kind, created_at FROM conversations ORDER BY created_at, id")
+        rows = q("SELECT c.id, c.title, c.kind, c.created_at FROM conversations c WHERE 1=1%s "
+                 "ORDER BY c.created_at, c.id" % frag, tuple(fargs))
     else:
         rows = q(
             "SELECT c.id, c.title, c.kind, c.created_at FROM conversations c "
-            "JOIN members m ON m.conversation_id = c.id WHERE m.agent_id = ? "
-            "ORDER BY c.created_at, c.id",
-            (who["id"],),
+            "JOIN members m ON m.conversation_id = c.id WHERE m.agent_id = ?%s "
+            "ORDER BY c.created_at, c.id" % frag,
+            (who["id"],) + tuple(fargs),
         )
     out = []
     for r in rows:
@@ -351,6 +581,9 @@ def post_message(
     if not text:
         raise HTTPException(status_code=400, detail="消息内容不能为空")
 
+    acct = billable_account(who)
+    quota_guard(acct, "msg")          # 账号维度卡口：超额 → 402（管理员 / 旧数据不受限）
+
     from_kind = who["kind"]
     from_id = who["id"]
 
@@ -389,6 +622,8 @@ def post_message(
         if old is None:
             raise HTTPException(status_code=409, detail="消息写入冲突，请重试")
         return {"id": old["id"], "seq": old["seq"], "duplicate": True}
+    recips = [a for a in conv_member_ids(cid) if not (from_kind == "agent" and a == from_id)]
+    record_usage(acct, "msg", max(len(recips), 1))      # 按投递计量：投给几个成员就记几条
     return {"id": mid, "seq": seq, "duplicate": False}
 
 
@@ -423,8 +658,12 @@ def agent_inbox(
 ) -> Dict[str, object]:
     if who["kind"] == "agent" and who["id"] != aid:
         raise HTTPException(status_code=403, detail="只能读自己的收件箱")
-    if q1("SELECT 1 FROM agents WHERE id = ?", (aid,)) is None:
+    arow = q1("SELECT id, owner_account FROM agents WHERE id = ?", (aid,)) \
+        if has_col("agents", "owner_account") else q1("SELECT id FROM agents WHERE id = ?", (aid,))
+    if arow is None:
         raise HTTPException(status_code=404, detail="agent 不存在")
+    if not can_see_owner(owner_of_row(arow), who):      # 账号 token 只能读自己账号名下的 agent
+        raise HTTPException(status_code=403, detail="这个 agent 不属于你的账号")
 
     cids = [r["conversation_id"] for r in q("SELECT conversation_id FROM members WHERE agent_id = ?", (aid,))]
     if not cids:

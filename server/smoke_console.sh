@@ -9,6 +9,7 @@ set -uo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 PORT="${HUB_PORT:-8797}"
+PY="${PYTHON:-python3}"     # 换解释器： PYTHON=/opt/homebrew/bin/python3 bash smoke_console.sh
 
 # 本机常驻着别的 warm-hub 开发实例（老产品 产品/通信台/main.py 也听 8797），
 # 8797 被占就顺延找空端口——别去杀别人的进程。
@@ -36,11 +37,11 @@ trap cleanup EXIT
 PASS=0; FAIL=0
 ok()  { echo "  ✅ $1"; PASS=$((PASS+1)); }
 bad() { echo "  ❌ $1"; FAIL=$((FAIL+1)); }
-jq_() { python3 -c "import sys,json;d=json.load(sys.stdin);print(eval(\"d$1\"))" 2>/dev/null; }
+jq_() { "$PY" -c "import sys,json;d=json.load(sys.stdin);print(eval(\"d$1\"))" 2>/dev/null; }
 
 # 发消息（body 走 python 拼，避免中文/引号踩坑）
 send() {  # $1=token $2=to $3=text
-  python3 -c "import json,sys;print(json.dumps({'to':sys.argv[1],'text':sys.argv[2]}))" "$2" "$3" \
+  "$PY" -c "import json,sys;print(json.dumps({'to':sys.argv[1],'text':sys.argv[2]}))" "$2" "$3" \
     | curl -s --max-time 10 -X POST "$BASE/v1/send" \
         -H "Authorization: Bearer $1" -H 'Content-Type: application/json' --data-binary @-
 }
@@ -64,7 +65,7 @@ PY
 
 echo "== 起服务：$BASE（HUB_DB=$DB）"
 HUB_PORT="$PORT" HUB_DB="$DB" HUB_SITE_DIR="$TMPD/no-site" \
-  python3 "$TMPD/boot.py" "$DIR" > "$TMPD/srv.log" 2>&1 &
+  "$PY" "$TMPD/boot.py" "$DIR" > "$TMPD/srv.log" 2>&1 &
 SRV=$!
 
 READY=0
@@ -105,9 +106,9 @@ echo "$R" | grep -qE '"ok" *: *true' && ok "Agent-A 回话（seq $(echo "$R" | j
 
 # ---------------------------------------------------------------- 4 心跳（在线判定）
 echo "[4] 打心跳：Agent-A 现在 / Agent-B 10 分钟前"
-NOW_ISO=$(python3 -c "from datetime import datetime,timezone;print(datetime.now(timezone.utc).astimezone().isoformat(timespec='seconds'))")
-OLD_ISO=$(python3 -c "from datetime import datetime,timezone,timedelta;print((datetime.now(timezone.utc)-timedelta(minutes=10)).astimezone().isoformat(timespec='seconds'))")
-TOUCH_OUT=$(HUB_DB="$DB" python3 -c "
+NOW_ISO=$("$PY" -c "from datetime import datetime,timezone;print(datetime.now(timezone.utc).astimezone().isoformat(timespec='seconds'))")
+OLD_ISO=$("$PY" -c "from datetime import datetime,timezone,timedelta;print((datetime.now(timezone.utc)-timedelta(minutes=10)).astimezone().isoformat(timespec='seconds'))")
+TOUCH_OUT=$(HUB_DB="$DB" "$PY" -c "
 import sys; sys.path.insert(0, '$DIR')
 import console
 console.touch('$AID')                  # 没 attach 也能用：自己开一条连接写 presence
@@ -121,7 +122,7 @@ print('touched')
 echo "[5] GET /v1/board"
 BOARD="$TMPD/board.json"
 curl -s --max-time 10 "$BASE/v1/board" -H "Authorization: Bearer $T" > "$BOARD"
-python3 - "$BOARD" > "$TMPD/probe.sh" <<'PY'
+"$PY" - "$BOARD" > "$TMPD/probe.sh" <<'PY'
 import json, shlex, sys
 b = json.load(open(sys.argv[1]))
 ag = {x["name"]: x for x in b["agents"]}
@@ -164,10 +165,10 @@ PY
 
 # ---------------------------------------------------------------- 6 截断 200 字
 echo "[6] 超长消息应截断到 200 字"
-LONG=$(python3 -c "print('长消息截断测试' * 43)")   # 301 字
+LONG=$("$PY" -c "print('长消息截断测试' * 43)")   # 301 字
 send "$T" "Agent-A" "$LONG" >/dev/null
 curl -s --max-time 10 "$BASE/v1/board" -H "Authorization: Bearer $T" > "$BOARD"
-L=$(python3 -c "
+L=$("$PY" -c "
 import json;b=json.load(open('$BOARD'));t=b['timeline'][0]['text']
 print(len(t), t[-1])")
 set -- $L
@@ -194,7 +195,7 @@ echo "[8] 不带 token"
 # ---------------------------------------------------------------- 结果
 echo
 echo "--- /v1/board 实拍（截断显示） ---"
-python3 -c "
+"$PY" -c "
 import json;b=json.load(open('$BOARD'))
 print(json.dumps({'agents':b['agents'],'timeline':b['timeline'][:2],'usage':b['usage']},
                  ensure_ascii=False, indent=1)[:1200])"

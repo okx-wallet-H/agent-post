@@ -3,13 +3,14 @@
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 PORT="${HUB_PORT:-8798}"; BASE="http://127.0.0.1:$PORT"; T="h-dev-token"
+PY="${PYTHON:-python3}"     # 换解释器： PYTHON=/opt/homebrew/bin/python3 bash smoke_v1.sh
 TMPD="$DIR/.smoke-v1-tmp"; rm -rf "$TMPD"; mkdir -p "$TMPD"
-HUB_PORT="$PORT" HUB_DB="$TMPD/v1.db" python3 "$DIR/main.py" >"$TMPD/srv.log" 2>&1 &
+HUB_PORT="$PORT" HUB_DB="$TMPD/v1.db" "$PY" "$DIR/main.py" >"$TMPD/srv.log" 2>&1 &
 SRV=$!; sleep 4
 PASS=0; FAIL=0
 ok(){ echo "  ✅ $1"; PASS=$((PASS+1)); }
 bad(){ echo "  ❌ $1"; FAIL=$((FAIL+1)); }
-jq_(){ python3 -c "import sys,json;d=json.load(sys.stdin);print(eval(\"d$1\"))" 2>/dev/null; }
+jq_(){ "$PY" -c "import sys,json;d=json.load(sys.stdin);print(eval(\"d$1\"))" 2>/dev/null; }
 
 echo "[1] 建 Agent（一行）"
 A=$(curl -s -X POST "$BASE/v1/agents" -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"name":"小助手"}')

@@ -48,12 +48,62 @@ def _ex(sql: str, args=()) -> sqlite3.Cursor:
     return _S["ex"](sql, args)  # type: ignore[operator]
 
 
+# ---------------------------------------------------------------- 多租户 / 计费接线
+# 由 main.py 通过 attach(tenancy={...}) 注入（accounts/billing 两个交付模块的能力）。
+# 没注入时下面这套缺省值就是旧行为：不隔离、不卡口（保证本模块单独跑也不炸）。
+
+_NO_TENANCY: Dict[str, object] = {
+    "owner_filter": lambda who, col="owner_account": ("", []),
+    "can_see_owner": lambda owner, who: True,
+    "account_of": lambda who: None,
+    "billable_account": lambda who: None,
+    "quota_guard": lambda account_id, kind: None,
+    "record_usage": lambda account_id, kind, n=1: None,
+    "resolve_token": None,
+}
+
+
+def _t() -> Dict[str, object]:
+    ten = _S.get("tenancy")
+    if isinstance(ten, dict):
+        merged = dict(_NO_TENANCY)
+        merged.update(ten)
+        return merged
+    return _NO_TENANCY
+
+
+def _owner_of_row(r) -> Optional[str]:
+    """取一行的 owner_account；没有这列（accounts 没挂）时当 None。"""
+    try:
+        return r["owner_account"]
+    except (IndexError, KeyError, TypeError):
+        return None
+
+
+def _agent_visible(row, who: Optional[Dict[str, str]]) -> bool:
+    return bool(_t()["can_see_owner"](_owner_of_row(row), who))  # type: ignore[operator]
+
+
+def _has_col(tbl: str, col: str) -> bool:
+    return col in [r[1] for r in _q("PRAGMA table_info(%s)" % tbl)]
+
+
 def _who(token: str) -> Optional[Dict[str, str]]:
-    """token → {"kind":"human"|"agent","id":...,"name":...}"""
+    """token → {"kind":"human"|"agent","id":...,"name":...}
+    认三种：人总 token（HUB_USER_TOKEN，全权）/ 账号 token（id=账号）/ agent token。"""
     if not token:
         return None
     if token == _S.get("user_token"):
         return {"kind": "human", "id": "human", "name": "人"}
+    resolve = _t()["resolve_token"]            # accounts.resolve：账号 token → ("human", account_id)
+    if resolve is not None:
+        try:
+            r = resolve(token)
+        except Exception:
+            r = None
+        if r is not None and r[0] == "human":
+            row = _q1("SELECT email FROM accounts WHERE id = ?", (r[1],))
+            return {"kind": "human", "id": r[1], "name": (row["email"] if row else r[1])}
     row = _q1("SELECT id, name FROM agents WHERE token = ?", (token,))
     if row is None:
         return None
@@ -86,13 +136,14 @@ class AgentIn(BaseModel):
     name: str
 
 
-def _find_agent(needle: str) -> sqlite3.Row:
-    """按 id 或名字找 Agent（名字唯一才认；重名就提示用 id）"""
+def _find_agent(needle: str, who: Optional[Dict[str, str]] = None) -> sqlite3.Row:
+    """按 id 或名字找 Agent（名字唯一才认；重名就提示用 id）。
+    多租户：只在调用方看得见的范围里找（账号 token 看不到别人的 Agent → 404）。"""
     needle = needle.strip()
     row = _q1("SELECT * FROM agents WHERE id = ?", (needle,))
-    if row is not None:
+    if row is not None and _agent_visible(row, who):
         return row
-    rows = _q("SELECT * FROM agents WHERE name = ?", (needle,))
+    rows = [r for r in _q("SELECT * FROM agents WHERE name = ?", (needle,)) if _agent_visible(r, who)]
     if not rows:
         raise HTTPException(status_code=404, detail="没有这个 Agent：%s（可以先用 GET /v1/agents 看名字）" % needle)
     if len(rows) > 1:
@@ -100,8 +151,11 @@ def _find_agent(needle: str) -> sqlite3.Row:
     return rows[0]
 
 
-def _dm_between(a_id: str, b_id: str) -> sqlite3.Row:
-    """找两人之间的单聊；没有就建一条。'human' 表示人（本身不是 agent）"""
+def _dm_between(a_id: str, b_id: str, who: Optional[Dict[str, str]] = None) -> sqlite3.Row:
+    """找两人之间的单聊；没有就建一条。'human' 表示人（本身不是 agent）。
+    多租户：只认调用方可见的旧会话；新建的会话记 owner_account = 调用方账号（管理员/旧数据为 NULL）。"""
+    can_see = _t()["can_see_owner"]  # type: ignore[operator]
+
     def name_of(i: str) -> str:
         if i == "human":
             return "人"
@@ -117,7 +171,7 @@ def _dm_between(a_id: str, b_id: str) -> sqlite3.Row:
         for r in _q("SELECT conversation_id FROM members WHERE agent_id = ?", (b_id,)):
             cid = r["conversation_id"]
             conv = _q1("SELECT * FROM conversations WHERE id = ?", (cid,))
-            if conv is None or conv["kind"] != "dm":
+            if conv is None or conv["kind"] != "dm" or not can_see(_owner_of_row(conv), who):
                 continue
             have = {m["agent_id"] for m in _q("SELECT agent_id FROM members WHERE conversation_id = ?", (cid,))}
             if have == want_ids():
@@ -126,7 +180,7 @@ def _dm_between(a_id: str, b_id: str) -> sqlite3.Row:
         for r in _q("SELECT conversation_id FROM members WHERE agent_id = ?", (a_id,)):
             cid = r["conversation_id"]
             conv = _q1("SELECT * FROM conversations WHERE id = ?", (cid,))
-            if conv is None or conv["kind"] != "dm":
+            if conv is None or conv["kind"] != "dm" or not can_see(_owner_of_row(conv), who):
                 continue
             have = {m["agent_id"] for m in _q("SELECT agent_id FROM members WHERE conversation_id = ?", (cid,))}
             if have == want_ids():
@@ -134,8 +188,13 @@ def _dm_between(a_id: str, b_id: str) -> sqlite3.Row:
 
     cid = _S["new_id"]("cv")  # type: ignore[operator]
     title = ("人 ↔ " + name_of(b_id)) if a_id == "human" else (name_of(a_id) + " ↔ " + name_of(b_id))
-    _ex("INSERT INTO conversations (id, title, kind, created_at) VALUES (?,?,?,?)",
-        (cid, title.replace("人 ↔ 人", "人"), "dm", _S["now_iso"]()))  # type: ignore[operator]
+    owner = _t()["account_of"](who) if who else None  # type: ignore[operator]
+    if _has_col("conversations", "owner_account"):
+        _ex("INSERT INTO conversations (id, title, kind, created_at, owner_account) VALUES (?,?,?,?,?)",
+            (cid, title.replace("人 ↔ 人", "人"), "dm", _S["now_iso"](), owner))  # type: ignore[operator]
+    else:
+        _ex("INSERT INTO conversations (id, title, kind, created_at) VALUES (?,?,?,?)",
+            (cid, title.replace("人 ↔ 人", "人"), "dm", _S["now_iso"]()))  # type: ignore[operator]
     for aid in want_ids():
         _ex("INSERT OR IGNORE INTO members (conversation_id, agent_id) VALUES (?,?)", (cid, aid))
     return _q1("SELECT * FROM conversations WHERE id = ?", (cid,))  # type: ignore[return-value]
@@ -149,7 +208,9 @@ def v1_me(who: Dict[str, str] = Depends(me)) -> Dict[str, object]:  # type: igno
 
 @router.get("/v1/agents")
 def v1_agents(who: Dict[str, str] = Depends(me)) -> Dict[str, object]:  # type: ignore[assignment]
-    rows = _q("SELECT id, name, created_at FROM agents ORDER BY created_at")
+    frag, fargs = _t()["owner_filter"](who, "owner_account")  # type: ignore[operator]
+    rows = _q("SELECT id, name, created_at FROM agents WHERE 1=1%s ORDER BY created_at" % frag,
+              tuple(fargs))
     return {"agents": [{"id": r["id"], "name": r["name"]} for r in rows]}
 
 
@@ -160,10 +221,17 @@ def v1_create_agent(body: AgentIn, who: Dict[str, str] = Depends(me)) -> Dict[st
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="名字不能空")
+    _t()["quota_guard"](_t()["billable_account"](who), "agent")  # type: ignore[operator]  额度不够 → 402
     aid = _S["new_id"]("ag")  # type: ignore[operator]
     tok = _S["new_token"]()  # type: ignore[operator]
-    _ex("INSERT INTO agents (id, name, token, created_at) VALUES (?,?,?,?)",
-        (aid, name, tok, _S["now_iso"]()))  # type: ignore[operator]
+    owner = _t()["account_of"](who)  # type: ignore[operator]
+    if _has_col("agents", "owner_account"):
+        _ex("INSERT INTO agents (id, name, token, created_at, owner_account) VALUES (?,?,?,?,?)",
+            (aid, name, tok, _S["now_iso"](), owner))  # type: ignore[operator]
+    else:
+        _ex("INSERT INTO agents (id, name, token, created_at) VALUES (?,?,?,?)",
+            (aid, name, tok, _S["now_iso"]()))  # type: ignore[operator]
+    _t()["record_usage"](_t()["billable_account"](who), "agent", 1)  # type: ignore[operator]
     return {"id": aid, "name": name, "token": tok, "note": "token 只显示这一次，存好"}
 
 
@@ -176,11 +244,14 @@ def v1_send(body: SendIn, who: Dict[str, str] = Depends(me)) -> Dict[str, object
     if to in ("人", "human", "老板", "我"):
         target_id, target_name = "human", "人"
     else:
-        row = _find_agent(to)
+        row = _find_agent(to, who)          # 多租户：只能发给看得见的 Agent（别人的 → 404）
         target_id, target_name = row["id"], row["name"]
-    if target_id == who["id"]:
+    me_id = "human" if who["kind"] == "human" else who["id"]
+    if target_id == me_id:
         raise HTTPException(status_code=400, detail="别给自己发")
-    conv = _dm_between(who["id"], target_id)
+    acct = _t()["billable_account"](who)  # type: ignore[operator]  管理员/旧数据 → None（不受限）
+    _t()["quota_guard"](acct, "msg")  # type: ignore[operator]       账号维度卡口：超额 → 402
+    conv = _dm_between(me_id, target_id, who)
     cmid = (body.client_msg_id or "").strip() or None
     if cmid:
         old = _q1("SELECT * FROM messages WHERE conversation_id = ? AND client_msg_id = ?", (conv["id"], cmid))
@@ -197,6 +268,7 @@ def v1_send(body: SendIn, who: Dict[str, str] = Depends(me)) -> Dict[str, object
         if old is None:
             raise HTTPException(status_code=409, detail="写入冲突，请重试")
         return {"ok": True, "duplicate": True, "id": old["id"], "seq": old["seq"], "conversation_id": conv["id"]}
+    _t()["record_usage"](acct, "msg", 1)  # type: ignore[operator]   按投递计量（单聊 = 1 条）
     return {"ok": True, "duplicate": False, "id": mid, "seq": seq, "conversation_id": conv["id"],
             "to": {"id": target_id, "name": target_name}}
 
@@ -216,13 +288,17 @@ def v1_inbox(since: int = 0, limit: int = 200, wait: int = 0,
 
 
 def _inbox_rows(since: int, limit: int, who: Dict[str, str]) -> List[sqlite3.Row]:
+    frag, fargs = _t()["owner_filter"](who, "c.owner_account")  # type: ignore[operator]  账号隔离
     if who["kind"] == "human":
-        return _q("SELECT * FROM messages WHERE seq > ? ORDER BY seq LIMIT ?", (since, min(limit, 500)))
+        return _q("SELECT m.* FROM messages m JOIN conversations c ON c.id = m.conversation_id"
+                  " WHERE m.seq > ?%s ORDER BY m.seq LIMIT ?" % frag,
+                  (since,) + tuple(fargs) + (min(limit, 500),))
     # 注意：agent 的收件箱**不含它自己发的**——否则守候进程会把自己的回话当成新消息，形成回环
     return _q("SELECT m.* FROM messages m JOIN members mb ON mb.conversation_id = m.conversation_id"
-              " WHERE mb.agent_id = ? AND m.seq > ? AND NOT (m.from_kind='agent' AND m.from_id = ?)"
-              " ORDER BY m.seq LIMIT ?",
-              (who["id"], since, who["id"], min(limit, 500)))
+              " JOIN conversations c ON c.id = m.conversation_id"
+              " WHERE mb.agent_id = ? AND m.seq > ? AND NOT (m.from_kind='agent' AND m.from_id = ?)%s"
+              " ORDER BY m.seq LIMIT ?" % frag,
+              (who["id"], since, who["id"]) + tuple(fargs) + (min(limit, 500),))
 
 
 def _inbox_out(rows: List[sqlite3.Row], since: int) -> Dict[str, object]:

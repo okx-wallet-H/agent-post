@@ -1,13 +1,13 @@
-INFO:     Started server process [35114]
+INFO:     Started server process [54360]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8799 (Press CTRL+C to quit)
 [温暖通信台] http://127.0.0.1:8799   DB=/Users/h/Desktop/温暖Agent助手/产品/agent-post-repo/server/.smoke-wait-tmp/w.db
-INFO:     127.0.0.1:53483 - "POST /v1/agents HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53484 - "GET /v1/inbox?since=0&wait=2 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53486 - "POST /v1/send HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53485 - "GET /v1/inbox?since=0&wait=15 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61832 - "POST /v1/agents HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61833 - "GET /v1/inbox?since=0&wait=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61837 - "POST /v1/send HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61836 - "GET /v1/inbox?since=0&wait=15 HTTP/1.1" 200 OK
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [35114]
+INFO:     Finished server process [54360]
