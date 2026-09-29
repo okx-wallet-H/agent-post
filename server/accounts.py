@@ -249,6 +249,13 @@ def register(
         "INSERT INTO account_tokens (token, account_id, created_at) VALUES (?,?,?)",
         (token, account_id, now_iso()),
     )
+    # 新账号自动领试用券（14 天 / 2000 条）——否则新用户一进来就撞「额度用尽」
+    try:
+        import billing as _b
+        _code = _b.create_coupon(conn, None, 14, 2000)
+        _b.redeem_coupon(conn, _code, account_id)
+    except Exception as _e:
+        print("试用券发放失败（不影响注册）：", _e)
     conn.commit()
     return {"account_id": account_id, "token": token}
 

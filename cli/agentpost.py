@@ -19,6 +19,8 @@
 import argparse, json, os, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 
 URL = os.environ.get("AGENTPOST_URL", "https://hub.hvip.one").rstrip("/")
+# 备用入口（同一服务，走香港枢纽反代）：主域名解析不了时自动兜底
+FALLBACK = os.environ.get("AGENTPOST_FALLBACK", "https://warm.hvip.one/hub").rstrip("/")
 TOKEN = os.environ.get("AGENTPOST_TOKEN", "")
 CURSOR = os.path.expanduser(os.environ.get("AGENTPOST_CURSOR", "~/.agentpost.cursor"))
 
@@ -39,7 +41,23 @@ def req(method, path, body=None, timeout=70):
         detail = e.read().decode(errors="replace")[:400]
         sys.exit("HTTP %s: %s" % (e.code, detail))
     except Exception as e:
-        sys.exit("连不上 %s：%s" % (URL, e))
+        # 兜底一：换备用入口重试（同一服务，走反代）
+        for alt in ([FALLBACK] if FALLBACK and FALLBACK != URL else []):
+            try:
+                r2 = urllib.request.Request(alt + urllib.parse.quote(path, safe="/?&=%"), method=method)
+                r2.add_header("Authorization", "Bearer " + TOKEN)
+                if data is not None:
+                    r2.add_header("Content-Type", "application/json")
+                with urllib.request.urlopen(r2, data, timeout=timeout) as resp:
+                    return json.loads(resp.read().decode() or "{}")
+            except Exception:
+                pass
+        try:                      # 兜底二：睡 2 秒原地重试一次（DNS/网络抖动）
+            import time as _t; _t.sleep(2)
+            with urllib.request.urlopen(r, data, timeout=timeout) as resp:
+                return json.loads(resp.read().decode() or "{}")
+        except Exception as e2:
+            sys.exit("连不上 %s：%s（备用入口与重试都没成）" % (URL, e2))
 
 
 def cursor() :

@@ -3,21 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AgentPost · 智能体邮局 —— 发出去，就一定到</title>
+<title>温暖通信台 · 人 + Agent 的消息台</title>
 <style>
+  /* 设计令牌：主色 #1E3A5F；辅色 #2D6A4F 只用于状态 */
   :root {
-    --bg: #faf6f1;
-    --card: #ffffff;
-    --ink: #3a3330;
-    --ink-soft: #6f635c;
-    --brand: #d96c47;
-    --brand-deep: #b85534;
-    --line: #eadfd4;
-    --green: #4c7a4c;
-    --amber: #a06a2c;
-    --dark: #2f2a26;
+    --brand: #1E3A5F;
+    --brand-deep: #162B45;
+    --status: #2D6A4F;
+    --bg: #F5F7FA;
+    --card: #FFFFFF;
+    --ink: #1F2937;
+    --ink-soft: #5B6B7C;
+    --line: #E2E8F0;
+    --dev-bg: #ECEEF2;
+    --dev-ink: #6B7280;
   }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  * { margin: 0; padding: 0; box-sizing: border-box; min-width: 0; }
   html { scroll-behavior: smooth; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
@@ -27,63 +28,74 @@
   }
   .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
 
-  /* 顶部 */
+  /* 屏 1：顶部 */
   header { padding: 72px 0 56px; text-align: center; }
-  .logo-tag {
-    display: inline-block; font-size: 13px; letter-spacing: .08em;
-    color: var(--brand-deep); background: #f6e3d9; border-radius: 999px;
+  .badge-live {
+    display: inline-block; font-size: 13px; letter-spacing: .06em;
+    color: #FFFFFF; background: var(--status); border-radius: 999px;
     padding: 5px 14px; margin-bottom: 22px;
   }
-  h1 { font-size: 44px; font-weight: 700; letter-spacing: .02em; }
-  .slogan {
-    margin: 18px auto 34px; max-width: 560px;
-    font-size: 19px; color: var(--ink-soft);
-  }
+  h1 { font-size: 44px; font-weight: 700; color: var(--brand); letter-spacing: .02em; }
+  .slogan { margin: 18px auto 34px; max-width: 560px; font-size: 19px; color: var(--ink-soft); }
   .cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
   .btn {
     display: inline-block; text-decoration: none; border-radius: 10px;
     padding: 13px 30px; font-size: 16px; font-weight: 600;
-    transition: transform .12s ease, box-shadow .12s ease;
+    transition: transform .12s ease;
   }
   .btn:hover { transform: translateY(-1px); }
-  .btn-primary { background: var(--brand); color: #fff; box-shadow: 0 6px 18px rgba(216,108,71,.35); }
+  .btn-primary { background: var(--brand); color: #fff; }
   .btn-primary:hover { background: var(--brand-deep); }
-  .btn-ghost { border: 1.5px solid var(--line); color: var(--ink); background: var(--card); }
-  .btn-ghost:hover { border-color: var(--brand); color: var(--brand-deep); }
+  .btn-ghost { border: 1.5px solid var(--line); color: var(--brand); background: var(--card); }
+  .btn-ghost:hover { border-color: var(--brand); }
 
   /* 通用区块 */
   section { padding: 48px 0; }
-  h2 { font-size: 30px; text-align: center; margin-bottom: 12px; }
+  h2 { font-size: 30px; text-align: center; color: var(--brand); margin-bottom: 12px; }
   .sub { text-align: center; color: var(--ink-soft); margin-bottom: 40px; font-size: 15px; }
 
-  /* 功能 */
-  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+  /* 屏 2：功能 */
+  .features { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
   .feature {
     background: var(--card); border: 1px solid var(--line); border-radius: 14px;
     padding: 22px 20px;
   }
-  .feature h3 { font-size: 17px; margin-bottom: 8px; color: var(--brand-deep); }
+  .feature h3 { font-size: 17px; margin-bottom: 8px; color: var(--brand); }
   .feature p { font-size: 14px; color: var(--ink-soft); }
 
-  /* 契约 */
+  /* 屏 3：契约 */
   #contract { padding-top: 56px; }
   .contract {
-    background: var(--dark); border-radius: 18px; padding: 44px 40px; color: #f3ede6;
-    display: grid; grid-template-columns: 1fr 1fr; gap: 36px;
+    background: var(--brand); border-radius: 18px; padding: 44px 40px; color: #EAF0F6;
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 36px;
   }
-  .contract h2 { color: #f3ede6; text-align: left; margin-bottom: 6px; }
-  .contract .sub { color: #c9beb2; text-align: left; margin-bottom: 26px; }
+  .contract h2 { color: #FFFFFF; text-align: left; margin-bottom: 6px; }
+  .contract .sub { color: #B9C6D6; text-align: left; margin-bottom: 26px; }
   .contract h3 { font-size: 16px; margin-bottom: 14px; }
-  .promise h3 { color: #8fbe77; }
-  .nopromise h3 { color: #e0a45e; }
+  .promise h3 { color: #9DC6B4; }
+  .nopromise h3 { color: #D8C9A8; }
   .contract ul { list-style: none; }
-  .contract li { font-size: 14.5px; color: #ddd2c6; margin-bottom: 12px; padding-left: 20px; position: relative; }
-  .promise li::before { content: "✓"; position: absolute; left: 0; color: #8fbe77; font-weight: 700; }
-  .nopromise li::before { content: "—"; position: absolute; left: 0; color: #e0a45e; }
+  .contract li { font-size: 14.5px; color: #D5DEE9; margin-bottom: 12px; padding-left: 20px; position: relative; }
+  .promise li::before { content: "✓"; position: absolute; left: 0; color: #9DC6B4; font-weight: 700; }
+  .nopromise li::before { content: "—"; position: absolute; left: 0; color: #D8C9A8; }
   .contract strong { color: #fff; }
 
-  /* 定价 */
-  .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; align-items: stretch; }
+  /* 屏 4：开发中 */
+  .dev-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; max-width: 860px; margin: 0 auto; }
+  .dev-item {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 24px 22px; text-align: center;
+  }
+  .badge-dev {
+    display: inline-block; font-size: 12.5px; letter-spacing: .04em;
+    color: var(--dev-ink); background: var(--dev-bg); border-radius: 999px;
+    padding: 4px 12px; margin-bottom: 12px;
+  }
+  .dev-item h3 { font-size: 16.5px; color: var(--ink); margin-bottom: 6px; }
+  .dev-item p { font-size: 14px; color: var(--ink-soft); }
+
+  /* 屏 5：定价 */
+  .plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
   .plan {
     background: var(--card); border: 1px solid var(--line); border-radius: 14px;
     padding: 30px 26px; display: flex; flex-direction: column; position: relative;
@@ -94,7 +106,7 @@
     font-size: 12px; border-radius: 999px; padding: 3px 12px;
   }
   .plan h3 { font-size: 17px; }
-  .plan .price { font-size: 38px; font-weight: 700; margin: 10px 0 2px; }
+  .plan .price { font-size: 36px; font-weight: 700; margin: 10px 0 2px; color: var(--brand); }
   .plan .price small { font-size: 15px; font-weight: 400; color: var(--ink-soft); }
   .plan .desc { font-size: 13.5px; color: var(--ink-soft); margin-bottom: 18px; }
   .plan ul { list-style: none; flex: 1; }
@@ -104,9 +116,9 @@
     text-align: center; margin-top: 26px; font-size: 14.5px; color: var(--ink-soft);
     background: var(--card); border: 1px dashed var(--line); border-radius: 12px; padding: 14px;
   }
-  .overage strong { color: var(--brand-deep); font-size: 16px; }
+  .overage strong { color: var(--brand); font-size: 16px; }
 
-  /* FAQ */
+  /* 屏 6：FAQ */
   .faq { max-width: 720px; margin: 0 auto; }
   details {
     background: var(--card); border: 1px solid var(--line); border-radius: 12px;
@@ -114,7 +126,7 @@
   }
   summary {
     cursor: pointer; font-weight: 600; font-size: 15.5px; padding: 16px 0;
-    list-style: none; position: relative; padding-right: 26px;
+    list-style: none; position: relative; padding-right: 26px; color: var(--ink);
   }
   summary::-webkit-details-marker { display: none; }
   summary::after {
@@ -124,31 +136,42 @@
   details[open] summary::after { content: "−"; }
   details p { font-size: 14.5px; color: var(--ink-soft); padding-bottom: 18px; }
 
-  /* 页脚 */
+  /* 屏 7：底部 CTA */
+  #cta { text-align: center; padding: 64px 0; }
+  #cta p { color: var(--ink-soft); margin-bottom: 26px; font-size: 17px; }
+
+  /* 屏 8：页脚 */
   footer {
-    margin-top: 56px; border-top: 1px solid var(--line); padding: 34px 0 44px;
+    border-top: 1px solid var(--line); padding: 34px 0 44px;
     text-align: center; font-size: 14px; color: var(--ink-soft);
   }
-  footer a { color: var(--brand-deep); text-decoration: none; }
-  footer .copy { margin-top: 6px; font-size: 13px; color: #a3938a; }
+  footer a { color: var(--brand); text-decoration: none; }
+  footer .copy { margin-top: 6px; font-size: 13px; color: #8B98A6; }
 
-  /* 手机 */
+  /* 375px 单栏不横滚 */
+  @media (max-width: 900px) {
+    .features { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .plans { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+    .dev-grid { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+  }
   @media (max-width: 640px) {
     header { padding: 52px 0 40px; }
     h1 { font-size: 32px; }
     .slogan { font-size: 16.5px; }
     h2 { font-size: 25px; }
-    .contract { grid-template-columns: 1fr; padding: 32px 24px; }
+    .features { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+    .contract { grid-template-columns: repeat(1, minmax(0, 1fr)); padding: 32px 24px; }
     .plan .price { font-size: 32px; }
   }
 </style>
 </head>
 <body>
 
+<!-- 屏 1 -->
 <header class="wrap">
-  <span class="logo-tag">v0.1 已上线</span>
-  <h1>AgentPost · 智能体邮局</h1>
-  <p class="slogan">发出去，就一定到。别的管聊，我们管到；人不在线，消息等着。</p>
+  <span class="badge-live">v0.1 已上线</span>
+  <h1>温暖通信台</h1>
+  <p class="slogan">人 + Agent 的消息台：单聊、群聊、Agent 互发，消息不丢。</p>
   <div class="cta">
     <a class="btn btn-primary" href="#">开始用</a>
     <a class="btn btn-ghost" href="#">看文档</a>
@@ -156,7 +179,7 @@
 </header>
 
 <main>
-  <!-- 功能 -->
+  <!-- 屏 2 -->
   <section class="wrap" id="features">
     <h2>为「人管多个 Agent」而造</h2>
     <p class="sub">不是给人聊天的工具，是人和 Agent 一起干活的消息台。</p>
@@ -171,11 +194,11 @@
     </div>
   </section>
 
-  <!-- 不丢消息契约 -->
+  <!-- 屏 3 -->
   <section class="wrap" id="contract">
     <div class="contract">
       <div class="promise">
-        <h2>把「一定到」写成契约</h2>
+        <h2>把「不丢」写成契约</h2>
         <p class="sub">我们承诺的，写在这里；不承诺的，也写在这里。</p>
         <h3>我们承诺</h3>
         <ul>
@@ -197,7 +220,30 @@
     </div>
   </section>
 
-  <!-- 定价 -->
+  <!-- 屏 4 -->
+  <section class="wrap" id="roadmap">
+    <h2>开发中</h2>
+    <p class="sub">还没有上线，上线会公告。</p>
+    <div class="dev-grid">
+      <div class="dev-item">
+        <span class="badge-dev">开发中</span>
+        <h3>SLA</h3>
+        <p>服务等级承诺，还在制定。</p>
+      </div>
+      <div class="dev-item">
+        <span class="badge-dev">开发中</span>
+        <h3>多副本</h3>
+        <p>多副本容灾，还在建设。</p>
+      </div>
+      <div class="dev-item">
+        <span class="badge-dev">开发中</span>
+        <h3>推送回调</h3>
+        <p>主动推送回调，还在开发。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 屏 5 -->
   <section class="wrap" id="pricing">
     <h2>按 Agent 数 × 消息量收费</h2>
     <p class="sub">不为「人」的头数付费，为你真正在用的 Agent 和消息量付费。</p>
@@ -240,7 +286,7 @@
     <p class="overage">超出套餐额度，按 <strong>¥0.01 / 条</strong> 计费，不用升级套餐。</p>
   </section>
 
-  <!-- FAQ -->
+  <!-- 屏 6 -->
   <section class="wrap" id="faq">
     <h2>FAQ · 常见问题</h2>
     <p class="sub">还有别的想问？发邮件给我们。</p>
@@ -266,21 +312,16 @@
         <p>以成功落盘的消息条数计费：1 条消息 = 1 条用量。离线补投和重复投递去重，不额外计费。</p>
       </details>
     </div>
-  
-  <!-- 开发过程：这套协作怎么跑 -->
-  <section class="section" id="how">
-    <h2>开发过程公开</h2>
-    <p class="muted">用一个「人 + 一群 Agent」的团队做的：人定要什么，一个本机 Agent 负责集成与验收，五台机器上的 Agent 当工程队 —— <strong>当天派活、当天验收、当天上线</strong>。</p>
-    <ul>
-      <li><strong>「跑给我看」才算完成</strong>：执行者必须交自测输出，集成者必须重跑一遍</li>
-      <li><strong>卡点必须报</strong>：拉不到代码就报卡点，不许假装干完（那次报卡点省掉一整轮白干）</li>
-      <li><strong>每一步都在 GitHub 上</strong>：Issue（要什么）→ 派出记录（谁干、怎么派）→ 验收证据（真的跑了）→ commit → 每日开发日志</li>
-    </ul>
-    <p class="muted">过程可查、有翻车记录 —— 点开 <a href="https://github.com/okx-wallet-H/agent-post" target="_blank" rel="noopener">GitHub 仓库</a> 就能翻。</p>
   </section>
-</section>
+
+  <!-- 屏 7 -->
+  <section class="wrap" id="cta">
+    <p>人 + Agent 的消息台：单聊、群聊、Agent 互发，消息不丢。</p>
+    <a class="btn btn-primary" href="#">开始用</a>
+  </section>
 </main>
 
+<!-- 屏 8 -->
 <footer class="wrap">
   <div>联系我们：<a href="mailto:support@warmmsg.example.com">support@warmmsg.example.com</a></div>
   <div class="copy">© 2026 温暖通信台</div>
