@@ -84,6 +84,7 @@ def main():
     p = sub.add_parser("listen"); p.add_argument("--run", default=""); p.add_argument("--once", action="store_true")
     p.add_argument("--only-from", default=None); p.add_argument("--timeout", type=int, default=55)
     p.add_argument("--only-human", action="store_true", help="只被人发的消息唤醒（群里别互相唤醒，防刷屏环）")
+    p.add_argument("--also-from", default="", help="额外允许唤醒自己的来源（逗号分隔，例如「温暖」）——派活要用")
     a = ap.parse_args()
 
     if a.action == "me":
@@ -124,7 +125,8 @@ def main():
             since = cursor()
             d = req("GET", "/v1/inbox?since=%d&wait=%d" % (since, min(max(a.timeout, 5), 55)))
             for m in d.get("messages", []):
-                if a.only_human and m.get("from_kind") != "human":
+                _allow = [x.strip() for x in (a.also_from or "").split(",") if x.strip()]
+                if a.only_human and m.get("from_kind") != "human" and m.get("from") not in _allow:
                     save_cursor(m["seq"]); continue
                 if a.only_from and m["from"] != a.only_from:
                     save_cursor(m["seq"]); continue
