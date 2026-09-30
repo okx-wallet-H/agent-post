@@ -151,6 +151,28 @@ def _find_agent(needle: str, who: Optional[Dict[str, str]] = None) -> sqlite3.Ro
     return rows[0]
 
 
+def _find_conversation(needle: str, who: Optional[Dict[str, str]] = None) -> sqlite3.Row:
+    """按 cid 或标题找会话（标题唯一才认；重名就提示用 cid）。群发目标。
+    多租户：只在调用方看得见的范围里找（别人的会话 → 404）。"""
+    needle = needle.strip()
+    can_see = _t()["can_see_owner"]  # type: ignore[operator]
+    row = _q1("SELECT * FROM conversations WHERE id = ?", (needle,))
+    if row is not None and can_see(_owner_of_row(row), who):
+        return row
+    rows = [r for r in _q("SELECT * FROM conversations WHERE title = ?", (needle,))
+            if can_see(_owner_of_row(r), who)]
+    if not rows:
+        raise HTTPException(status_code=404, detail="没有这个 Agent 或会话：%s" % needle)
+    if len(rows) > 1:
+        raise HTTPException(status_code=409, detail="会话标题 %s 有多个，请改用会话 id" % needle)
+    return rows[0]
+
+
+def _conv_member_count(cid: str) -> int:
+    row = _q1("SELECT COUNT(*) AS n FROM members WHERE conversation_id = ?", (cid,))
+    return int(row["n"] or 0) if row else 0
+
+
 def _dm_between(a_id: str, b_id: str, who: Optional[Dict[str, str]] = None) -> sqlite3.Row:
     """找两人之间的单聊；没有就建一条。'human' 表示人（本身不是 agent）。
     多租户：只认调用方可见的旧会话；新建的会话记 owner_account = 调用方账号（管理员/旧数据为 NULL）。"""
@@ -241,17 +263,36 @@ def v1_send(body: SendIn, who: Dict[str, str] = Depends(me)) -> Dict[str, object
     if not text:
         raise HTTPException(status_code=400, detail="内容不能空")
     to = (body.to or "").strip()
+    conv: Optional[sqlite3.Row] = None
+    group = False
+    target_id, target_name = "", ""
     if to in ("人", "human", "老板", "我"):
         target_id, target_name = "human", "人"
     else:
-        row = _find_agent(to, who)          # 多租户：只能发给看得见的 Agent（别人的 → 404）
-        target_id, target_name = row["id"], row["name"]
-    me_id = "human" if who["kind"] == "human" else who["id"]
-    if target_id == me_id:
-        raise HTTPException(status_code=400, detail="别给自己发")
+        try:
+            row = _find_agent(to, who)      # 多租户：只能发给看得见的 Agent（别人的 → 404）
+        except HTTPException as e:
+            if e.status_code in (404, 409):
+                # 不是 Agent（或重名）：再试会话标题 / cid → 群发；都不是才把原错误抛回去
+                try:
+                    conv = _find_conversation(to, who)
+                except HTTPException:
+                    raise e
+                group = True
+            else:
+                raise
+        else:
+            target_id, target_name = row["id"], row["name"]
+    if group:
+        target_id, target_name = conv["id"], conv["title"]  # type: ignore[index]
+    else:
+        me_id = "human" if who["kind"] == "human" else who["id"]
+        if target_id == me_id:
+            raise HTTPException(status_code=400, detail="别给自己发")
     acct = _t()["billable_account"](who)  # type: ignore[operator]  管理员/旧数据 → None（不受限）
     _t()["quota_guard"](acct, "msg")  # type: ignore[operator]       账号维度卡口：超额 → 402
-    conv = _dm_between(me_id, target_id, who)
+    if not group:
+        conv = _dm_between(me_id, target_id, who)
     cmid = (body.client_msg_id or "").strip() or None
     if cmid:
         old = _q1("SELECT * FROM messages WHERE conversation_id = ? AND client_msg_id = ?", (conv["id"], cmid))
@@ -268,9 +309,13 @@ def v1_send(body: SendIn, who: Dict[str, str] = Depends(me)) -> Dict[str, object
         if old is None:
             raise HTTPException(status_code=409, detail="写入冲突，请重试")
         return {"ok": True, "duplicate": True, "id": old["id"], "seq": old["seq"], "conversation_id": conv["id"]}
-    _t()["record_usage"](acct, "msg", 1)  # type: ignore[operator]   按投递计量（单聊 = 1 条）
-    return {"ok": True, "duplicate": False, "id": mid, "seq": seq, "conversation_id": conv["id"],
-            "to": {"id": target_id, "name": target_name}}
+    _t()["record_usage"](acct, "msg", _conv_member_count(conv["id"]) if group else 1)  # type: ignore[operator]  按投递计量（群发 = 成员数）
+    out: Dict[str, object] = {"ok": True, "duplicate": False, "id": mid, "seq": seq,
+                              "conversation_id": conv["id"],
+                              "to": {"id": target_id, "name": target_name}}
+    if group:
+        out["to"] = {"kind": "group", "id": target_id, "name": target_name}
+    return out
 
 
 @router.get("/v1/inbox")
