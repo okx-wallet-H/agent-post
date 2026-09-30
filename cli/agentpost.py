@@ -112,6 +112,14 @@ def main():
 
     if a.action == "listen":
         print("守候中：%s（Ctrl-C 停）" % URL, flush=True)
+        if not os.path.exists(CURSOR):
+            # 首次启动：从「当前最新」开始，别把历史积压全量重放（会白烧一轮 Agent）
+            try:
+                d0 = req("GET", "/v1/inbox?since=0&limit=1")
+                save_cursor(d0.get("latest", 0))
+                print("首次启动：游标从最新 seq=%s 开始（要重放历史用 inbox --all）" % d0.get("latest", 0), flush=True)
+            except SystemExit:
+                pass
         while True:
             since = cursor()
             d = req("GET", "/v1/inbox?since=%d&wait=%d" % (since, min(max(a.timeout, 5), 55)))

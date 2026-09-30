@@ -310,5 +310,10 @@ def _inbox_out(rows: List[sqlite3.Row], since: int) -> Dict[str, object]:
                     "text": r["text"], "ts": r["created_at"],
                     "conversation": conv["title"] if conv else r["conversation_id"],
                     "conversation_id": r["conversation_id"]})
-    latest = max([r["seq"] for r in rows], default=since)
+    # 注意：不能把 since 原样回显成 latest（客户端把它存成游标后会永远收不到消息且不报错）
+    # 真实最大 seq 由库决定（不受 since 影响）
+    head = _q1("SELECT MAX(seq) AS m FROM messages")
+    global_max = int(head["m"] or 0) if head else 0
+    latest = max([r["seq"] for r in rows], default=0)
+    latest = max(latest, global_max if since > global_max else 0, since if since <= global_max else 0)
     return {"messages": out, "latest": latest, "count": len(out)}
