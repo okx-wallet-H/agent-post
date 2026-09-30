@@ -308,6 +308,7 @@ def _inbox_out(rows: List[sqlite3.Row], since: int) -> Dict[str, object]:
         conv = _q1("SELECT title FROM conversations WHERE id = ?", (r["conversation_id"],))
         out.append({"seq": r["seq"], "from": from_name, "from_kind": r["from_kind"],
                     "text": r["text"], "ts": r["created_at"],
-                    "conversation": conv["title"] if conv else r["conversation_id"]})
+                    "conversation": conv["title"] if conv else r["conversation_id"],
+                    "conversation_id": r["conversation_id"]})
     latest = max([r["seq"] for r in rows], default=since)
     return {"messages": out, "latest": latest, "count": len(out)}

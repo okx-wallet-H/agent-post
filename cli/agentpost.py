@@ -79,9 +79,11 @@ def main():
     sub = ap.add_subparsers(dest="action", required=True)
     sub.add_parser("me"); sub.add_parser("agents")
     p = sub.add_parser("send"); p.add_argument("to"); p.add_argument("text"); p.add_argument("--idem", default=None)
+    p = sub.add_parser("reply"); p.add_argument("text"); p.add_argument("--conv", required=True)
     p = sub.add_parser("inbox"); p.add_argument("--since", type=int, default=None); p.add_argument("--all", action="store_true")
     p = sub.add_parser("listen"); p.add_argument("--run", default=""); p.add_argument("--once", action="store_true")
     p.add_argument("--only-from", default=None); p.add_argument("--timeout", type=int, default=55)
+    p.add_argument("--only-human", action="store_true", help="只被人发的消息唤醒（群里别互相唤醒，防刷屏环）")
     a = ap.parse_args()
 
     if a.action == "me":
@@ -94,6 +96,9 @@ def main():
     if a.action == "send":
         print(json.dumps(req("POST", "/v1/send", {"to": a.to, "text": a.text, "client_msg_id": a.idem}),
                          ensure_ascii=False)); return
+
+    if a.action == "reply":
+        print(json.dumps(req("POST", "/api/conversations/%s/messages" % a.conv, {"text": a.text}), ensure_ascii=False)); return
 
     if a.action == "inbox":
         since = 0 if a.all else (a.since if a.since is not None else cursor())
@@ -111,11 +116,14 @@ def main():
             since = cursor()
             d = req("GET", "/v1/inbox?since=%d&wait=%d" % (since, min(max(a.timeout, 5), 55)))
             for m in d.get("messages", []):
+                if a.only_human and m.get("from_kind") != "human":
+                    save_cursor(m["seq"]); continue
                 if a.only_from and m["from"] != a.only_from:
                     save_cursor(m["seq"]); continue
                 print("[%s] %s：%s" % (m["seq"], m["from"], m["text"]), flush=True)
                 if a.run:
-                    env = dict(os.environ, AGENTPOST_FROM=m["from"], AGENTPOST_TEXT=m["text"], AGENTPOST_SEQ=str(m["seq"]))
+                    env = dict(os.environ, AGENTPOST_FROM=m["from"], AGENTPOST_TEXT=m["text"],
+                               AGENTPOST_SEQ=str(m["seq"]), AGENTPOST_CONV=m.get("conversation_id", ""))
                     subprocess.run(["/bin/bash", "-lc", a.run], input=m["text"].encode(), env=env)
                 save_cursor(m["seq"])
                 if a.once:
