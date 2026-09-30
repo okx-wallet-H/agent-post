@@ -185,6 +185,15 @@ try:
 except Exception as _e:
     print("官网挂载失败：", _e)
 
+# 计费出账与账单页（/api/invoice + /invoice）
+try:
+    import invoice
+    invoice.attach(db=_db, lock=_db_lock, user_token=USER_TOKEN, q=q, q1=q1, ex=ex,
+                   new_id=new_id, now_iso=now_iso, new_token=lambda: secrets.token_urlsafe(24))
+    app.include_router(invoice.router)
+except Exception as _e:
+    print("invoice 挂载失败：", _e)
+
 # 指标告警（/v1/alerts）：把"不丢"的异常主动喊出来
 try:
     import alerts
