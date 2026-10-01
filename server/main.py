@@ -203,6 +203,15 @@ try:
 except Exception as _e:
     print("alerts 挂载失败：", _e)
 
+# 自助接入页（/connect）：三步拿到 token 并发出第一条
+try:
+    import onboard
+    onboard.attach(db=_db, lock=_db_lock, user_token=USER_TOKEN, q=q, q1=q1, ex=ex,
+                   new_id=new_id, now_iso=now_iso, new_token=lambda: secrets.token_urlsafe(24))
+    app.include_router(onboard.router)
+except Exception as _e:
+    print("onboard 挂载失败：", _e)
+
 # 群聊界面（/chat）：人 + 多 Agent 同处一个会话
 try:
     import chat

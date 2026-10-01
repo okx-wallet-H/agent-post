@@ -1,0 +1,1 @@
+curl -s -X POST http://127.0.0.1:8797/v1/send -H "Authorization: Bearer hfkprWFJRMVzZYLQ7rlgN1Q9ndtr1HrfKaT0rf61QPI"      -H 'Content-Type: application/json' -d '{"to":"小助手","text":"你好"}'

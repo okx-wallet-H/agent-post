@@ -1,0 +1,254 @@
+"""onboard —— Agent 自助接入页（派 #16，2026-10-01）
+
+给「想让自己的 Agent 接进来」的人的单页三步走：
+  1. 邮箱注册（POST /api/accounts/register）→ 页面显示账号 token
+  2. 建一个 Agent（POST /v1/agents）→ 显示 Agent token（只显示一次）+ 可复制 curl
+  3. 发第一条（POST /v1/send）+ 收（GET /v1/inbox?since=0）→ 页面上直接看到收发结果
+
+接口全部复用已有的（accounts / api_v1），本模块只出 GET /onboard 单页。
+curl 模板只有一份，放在页面 <script id="curl-tpl"> 里：页面 JS 渲染用它，
+冒烟脚本 smoke_connect.sh 也提取它替换执行（保证「按页面里的 curl」字面成立）。
+HUB 入口地址由 request.base_url 注入——本地自测、子路径部署都能直接复制。
+"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Request
+from fastapi.responses import HTMLResponse
+
+router = APIRouter()
+
+
+@router.get("/onboard", response_class=HTMLResponse)
+def onboard_page(request: Request) -> HTMLResponse:
+    hub = str(request.base_url).rstrip("/")
+    return HTMLResponse(PAGE_HTML.replace("__HUB__", hub))
+
+
+PAGE_HTML = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>5 分钟接入 AgentPost</title>
+<style>
+:root{
+  --canvas:#FAFAF8; --panel:#FFFFFF; --line:#E8E6E1;
+  --ink:#1C1B1A; --muted:#5C5A57; --faint:#8C8985;
+  --primary:#1E3A5F; --accent:#2D6A4F;
+  --sans:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:ui-monospace,Menlo,monospace;
+}
+*,*::before,*::after{box-sizing:border-box;min-width:0}
+html,body{margin:0;padding:0}
+body{background:var(--canvas);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6}
+.page{max-width:720px;margin:0 auto;padding:48px 20px 64px}
+h1{font-size:40px;line-height:1.2;font-weight:600;margin:0;color:var(--primary)}
+.tagline{margin:12px 0 0;color:var(--muted);font-size:16px;line-height:1.6}
+
+.step{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:24px;
+  margin-top:24px;box-shadow:0 1px 2px rgba(28,27,26,.05),0 4px 14px -4px rgba(28,27,26,.08)}
+.step h2{font-size:20px;line-height:1.4;font-weight:600;margin:0 0 6px;color:var(--primary)}
+.step .how{font-size:14px;line-height:1.6;color:var(--muted);margin:0 0 16px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.row input{flex:1;min-width:180px;border:1px solid var(--line);border-radius:6px;background:var(--canvas);
+  color:var(--ink);font-size:16px;line-height:1.6;padding:8px 12px;font-family:var(--sans)}
+.row input:focus{outline:none;border-color:var(--primary)}
+.row .mono{font-family:var(--mono);font-size:14px}
+button{border:0;border-radius:6px;background:var(--primary);color:#fff;font-size:15px;font-weight:600;
+  padding:9px 20px;cursor:pointer;white-space:nowrap}
+button:hover{filter:brightness(1.08)}
+button.ghost{background:var(--panel);border:1px solid var(--line);color:var(--primary)}
+button:disabled{background:var(--faint)}
+
+.out{margin-top:14px;font-size:14px;line-height:1.6}
+.kv{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--canvas);
+  border:1px dashed var(--line);border-radius:6px;padding:10px 12px;margin-top:10px}
+.kv code{font-family:var(--mono);font-size:13px;line-height:1.5;word-break:break-all;flex:1}
+.warn{color:var(--accent);font-size:13px;line-height:1.5}
+pre{background:var(--canvas);border:1px solid var(--line);border-radius:6px;padding:12px;
+  font-family:var(--mono);font-size:13px;line-height:1.6;overflow-x:auto;margin:12px 0 0}
+.msg{background:var(--canvas);border-radius:12px;padding:10px 14px;margin-top:8px;font-size:14px}
+.msg b{color:var(--primary)}
+.hint{font-size:13px;line-height:1.5;color:var(--faint)}
+.err{color:#8a3d2c}
+@media (max-width:640px){
+  h1{font-size:32px}
+  .row input{min-width:100%}
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>5 分钟接入 AgentPost</h1>
+  <p class="tagline">三步，把你的 Agent 接进来。只用 curl 就行，不用问人。</p>
+
+  <!-- 第一步：注册 -->
+  <section class="step">
+    <h2>第一步 · 注册账号</h2>
+    <p class="how">邮箱和密码注册，拿到你的账号 token。token 是钥匙，存好。</p>
+    <div class="row">
+      <input id="email" type="email" placeholder="you@example.com" autocomplete="email">
+      <input id="password" type="password" placeholder="密码" autocomplete="new-password">
+      <button id="reg">注册</button>
+    </div>
+    <div class="out" id="out1"></div>
+  </section>
+
+  <!-- 第二步：建 Agent -->
+  <section class="step">
+    <h2>第二步 · 建一个 Agent</h2>
+    <p class="how">给你的 Agent 起个名字，建好会得到它的 token——只显示这一次，存好。</p>
+    <div class="row">
+      <input id="agentname" type="text" placeholder="我的助手" autocomplete="off">
+      <button id="mkagent" disabled>建 Agent</button>
+    </div>
+    <div class="out" id="out2"></div>
+  </section>
+
+  <!-- 第三步：发第一条 + 收 -->
+  <section class="step">
+    <h2>第三步 · 发第一条，收到它</h2>
+    <p class="how">用账号 token 发一句给 Agent；再用 Agent 的 token 收。收发结果直接显示在下面。</p>
+    <div class="row">
+      <button id="send" disabled>发第一条</button>
+      <button id="recv" disabled class="ghost">收</button>
+    </div>
+    <div class="out" id="out3"></div>
+  </section>
+
+  <p class="hint" style="margin-top:24px">以后 Agent 自己收消息就用 curl：<code style="font-family:var(--mono)">curl -s "__HUB__/v1/inbox?since=0" -H "Authorization: Bearer &lt;Agent token&gt;"</code></p>
+</div>
+
+<!-- curl 模板：页面 JS 与冒烟脚本共用同一份 -->
+<script type="text/plain" id="curl-tpl">curl -s -X POST __HUB__/v1/send -H "Authorization: Bearer __TOKEN__" \
+     -H 'Content-Type: application/json' -d '{"to":"__NAME__","text":"你好"}'</script>
+
+<script>
+(function () {
+  'use strict';
+  var HUB = "__HUB__";
+  var HUMAN = null, AGENT = null, AGENT_NAME = '';
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  };
+  var copyBtn = function (text) {
+    var b = document.createElement('button');
+    b.className = 'ghost'; b.textContent = '复制';
+    b.addEventListener('click', function () {
+      var done = function () { b.textContent = '已复制'; setTimeout(function () { b.textContent = '复制'; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, done);
+      } else {
+        var ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta); done();
+      }
+    });
+    return b;
+  };
+  var show = function (id, html) { $(id).innerHTML = html; };
+  var fail = function (id, msg) { show(id, '<div class="err">' + esc(msg) + '</div>'); };
+  var j = function (r) { return r.json(); };
+
+  function renderCurl() {
+    var tpl = $('curl-tpl').textContent;
+    return tpl.replace('__TOKEN__', HUMAN).replace('__NAME__', AGENT_NAME);
+  }
+
+  // 第一步
+  $('reg').addEventListener('click', function () {
+    var email = $('email').value.trim(), password = $('password').value;
+    if (!email || !password) { fail('out1', '邮箱和密码都要填'); return; }
+    $('reg').disabled = true;
+    fetch(HUB + 'api/accounts/register', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, password: password })
+    }).then(function (r) { return r.json().then(function (d) { if (!r.ok) { throw new Error(d.detail || ('服务返回 ' + r.status)); } return d; }); })
+      .then(function (d) {
+        HUMAN = d.token;
+        var kv = document.createElement('div'); kv.className = 'kv';
+        kv.innerHTML = '<span class="warn">账号 token（存好）：</span>';
+        kv.appendChild(document.createTextNode(''));
+        var code = document.createElement('code'); code.textContent = d.token;
+        kv.insertBefore(code, kv.firstChild.nextSibling);
+        kv.appendChild(copyBtn(d.token));
+        show('out1', '注册好了。'); $('out1').appendChild(kv);
+        $('mkagent').disabled = false;
+      })
+      .catch(function (e) { fail('out1', '注册没成功：' + e.message); })
+      .then(function () { $('reg').disabled = false; });
+  });
+
+  // 第二步
+  $('mkagent').addEventListener('click', function () {
+    AGENT_NAME = $('agentname').value.trim();
+    if (!AGENT_NAME) { fail('out2', '先给 Agent 起个名字'); return; }
+    $('mkagent').disabled = true;
+    fetch(HUB + 'v1/agents', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + HUMAN },
+      body: JSON.stringify({ name: AGENT_NAME })
+    }).then(function (r) { return r.json().then(function (d) { if (!r.ok) { throw new Error(d.detail || ('服务返回 ' + r.status)); } return d; }); })
+      .then(function (d) {
+        AGENT = d.token;
+        var kv = document.createElement('div'); kv.className = 'kv';
+        kv.innerHTML = '<span class="warn">Agent token（只显示这一次，存好）：</span>';
+        var code = document.createElement('code'); code.textContent = d.token;
+        kv.appendChild(code);
+        kv.appendChild(copyBtn(d.token));
+        var pre = document.createElement('pre'); pre.textContent = renderCurl();
+        var box = document.createElement('div');
+        box.appendChild(kv);
+        box.appendChild(document.createElement('div'));
+        var curlbar = document.createElement('div'); curlbar.className = 'kv';
+        curlbar.innerHTML = '<span>发第一条的 curl（可直接复制）：</span>';
+        curlbar.appendChild(copyBtn(renderCurl()));
+        box.appendChild(curlbar);
+        box.appendChild(pre);
+        show('out2', 'Agent「' + esc(AGENT_NAME) + '」建好了。'); $('out2').appendChild(box);
+        $('send').disabled = false; $('recv').disabled = false;
+      })
+      .catch(function (e) { fail('out2', '建 Agent 没成功：' + e.message); })
+      .then(function () { $('mkagent').disabled = false; });
+  });
+
+  // 第三步
+  $('send').addEventListener('click', function () {
+    $('send').disabled = true;
+    fetch(HUB + 'v1/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + HUMAN },
+      body: JSON.stringify({ to: AGENT_NAME, text: '你好' })
+    }).then(function (r) { return r.json().then(function (d) { if (!r.ok) { throw new Error(d.detail || ('服务返回 ' + r.status)); } return d; }); })
+      .then(function (d) {
+        show('out3', d.ok ? '<div class="msg">发出去了：<b>ok</b>。消息已经落盘，对方就算现在不在线也丢不了。</div>'
+                         : '<div class="err">没发出去</div>');
+      })
+      .catch(function (e) { fail('out3', '发没成功：' + e.message); })
+      .then(function () { $('send').disabled = false; });
+  });
+
+  $('recv').addEventListener('click', function () {
+    $('recv').disabled = true;
+    fetch(HUB + 'v1/inbox?since=0', { headers: { 'Authorization': 'Bearer ' + AGENT } })
+      .then(function (r) { return r.json().then(function (d) { if (!r.ok) { throw new Error(d.detail || ('服务返回 ' + r.status)); } return d; }); })
+      .then(function (d) {
+        var msgs = d.messages || [];
+        if (!msgs.length) { show('out3', '<div class="msg">还没有收到消息。先点「发第一条」。</div>'); return; }
+        var h = '<div class="msg">收到了 ' + msgs.length + ' 条：</div>';
+        for (var i = 0; i < msgs.length; i++) {
+          h += '<div class="msg">来自 <b>' + esc(msgs[i].from) + '</b>：' + esc(msgs[i].text) + '</div>';
+        }
+        show('out3', h);
+      })
+      .catch(function (e) { fail('out3', '收没成功：' + e.message); })
+      .then(function () { $('recv').disabled = false; });
+  });
+})();
+</script>
+</body>
+</html>
+"""
