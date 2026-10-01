@@ -30,9 +30,15 @@
    since = 现在（无单一事发时刻）。value = count。
    action：有写入异常/健康检查失败，查 GET /v1/metrics 的 failures 分项与 healthcheck 日志。
 
+⑤ stale_delivery —— 超时未取走积压（#15 新增）
+   判定：metrics 口径 5 的 stale_delivery.count（写入超过 stale_hours 小时且无接收方
+   在写入后活跃过的消息数）> stale_delivery_max。
+   since = 最老一条未取走消息的 created_at。value = count。
+   action：检查收件方是否接入/守候是否活着。
+
 阈值规则（POST /v1/alerts/rule，人 token）：heartbeat_max_min / latency_p95_max_s /
-zero_window_s / failures_max，可只传要改的字段。规则存内存（_S["rules"]），服务重启回默认值——
-持久化等有需要再接库。
+zero_window_s / failures_max / stale_delivery_max / stale_hours，可只传要改的字段。
+规则存内存（_S["rules"]），服务重启回默认值——持久化等有需要再接库。
 
 注入约定同 api_v1.py / metrics.py：main.py 调 attach(db=, lock=, user_token=, q=, q1=, ex=, ...)。
 本模块只读（q / q1），并把 attach 转发给 metrics（复用它口径 2/3 的计算函数）。
@@ -47,7 +53,7 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
-from metrics import _failures, _latency, _parse_ts, _q, _q1  # noqa: E402  （同目录，attach 后可用）
+from metrics import _failures, _latency, _parse_ts, _q, _q1, _stale_delivery  # noqa: E402
 
 router = APIRouter()
 
@@ -57,6 +63,8 @@ DEFAULT_RULES = {
     "latency_p95_max_s": 1800,   # ② 延迟 p95 阈值（秒）
     "zero_window_s": 3600,       # ③ 吞吐为 0 的观察窗口（秒）
     "failures_max": 0,           # ④ 失败计数上限
+    "stale_delivery_max": 0,     # ⑤ 超时未取走条数上限（#15）
+    "stale_hours": 6,            # ⑤ 未取走判定的小时数（#15）
 }
 
 
@@ -175,6 +183,21 @@ def _failure_alerts(now: datetime, rules: Dict[str, object]) -> List[Dict[str, o
     }]
 
 
+def _stale_alerts(now: datetime, rules: Dict[str, object]) -> List[Dict[str, object]]:
+    sd = _stale_delivery(now, float(rules["stale_hours"]))
+    count = int(sd.get("count", 0))
+    if count <= int(rules["stale_delivery_max"]):
+        return []
+    return [{
+        "type": "stale_delivery",
+        "subject": "全站",
+        "value": count,
+        "threshold": float(rules["stale_delivery_max"]),
+        "since": sd.get("oldest_created_at") or now.isoformat(timespec="seconds"),
+        "action": f"有 {count} 条消息超过 {rules['stale_hours']} 小时没人取走，检查收件方是否接入/守候是否活着",
+    }]
+
+
 # ---------------------------------------------------------------- 路由
 
 class RuleIn(BaseModel):
@@ -182,6 +205,8 @@ class RuleIn(BaseModel):
     latency_p95_max_s: Optional[float] = None
     zero_window_s: Optional[int] = None
     failures_max: Optional[int] = None
+    stale_delivery_max: Optional[int] = None
+    stale_hours: Optional[float] = None
 
 
 @router.get("/v1/alerts")
@@ -189,14 +214,16 @@ def v1_alerts(who: Dict[str, str] = Depends(me)) -> Dict[str, object]:  # type: 
     now = _now()
     rules = _rules()
     alerts = (_heartbeat_alerts(now, rules) + _latency_alerts(now, rules)
-              + _throughput_alerts(now, rules) + _failure_alerts(now, rules))
+              + _throughput_alerts(now, rules) + _failure_alerts(now, rules)
+              + _stale_alerts(now, rules))
     return {"at": now.isoformat(timespec="seconds"), "rules": rules, "alerts": alerts}
 
 
 @router.post("/v1/alerts/rule")
 def v1_alerts_rule(body: RuleIn, who: Dict[str, str] = Depends(require_human)) -> Dict[str, object]:  # type: ignore[assignment]
     rules = dict(_rules())
-    for k in ("heartbeat_max_min", "latency_p95_max_s", "zero_window_s", "failures_max"):
+    for k in ("heartbeat_max_min", "latency_p95_max_s", "zero_window_s", "failures_max",
+              "stale_delivery_max", "stale_hours"):
         v = getattr(body, k)
         if v is not None:
             rules[k] = v

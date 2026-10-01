@@ -1,8 +1,10 @@
 #!/bin/bash
 # smoke_alerts.sh —— alerts.py 冒烟测试（临时库 + 临时端口，不碰生产 hub.db）
 # 造两种情形：乙 心跳过期（35 分钟前）→ 应报 heartbeat_stale；甲 心跳正常（1 分钟前）→ 不报；
-#           延迟 p95 超阈（消息 2 小时前写入、乙心跳 35 分钟前 → 上界 85 分钟 > 1800s）→ 应报 latency_p95_high；
-#           最近 1 小时有消息 → throughput_zero 不报；无脏数据无 FAIL → failures_positive 不报。
+#           延迟 p95 超阈（消息 80 分钟前写入、乙心跳 35 分钟前 → 上界 45 分钟 = 2700s，落在
+#           取走窗口 3600s 内、按 #15 新口径算延迟，且 > 1800s）→ 应报 latency_p95_high；
+#           最近 1 小时有消息 → throughput_zero 不报；无脏数据无 FAIL → failures_positive 不报；
+#           无超过 stale_hours=6 的未取走消息 → stale_delivery 不报。
 # 断言：alerts 恰好 [heartbeat_stale(乙), latency_p95_high]，规则默认值对；POST /v1/alerts/rule
 #       人 token 改阈值生效、agent token 403。
 # 跑法： bash smoke_alerts.sh；SMOKE_PORT=8803 bash smoke_alerts.sh（换端口）
@@ -51,7 +53,7 @@ db.execute("INSERT INTO presence VALUES ('ag1',?)", (iso(1),))
 db.execute("INSERT INTO presence VALUES ('ag2',?)", (iso(35),))
 # 消息：2 小时前 ag1→ag2（乙取走上界 = 35 分钟前心跳，延迟 ≈ 85 分钟 > 1800s → p95 超阈）；
 #       10 分钟前 ag2→ag1（最近 1 小时有消息 → 吞吐告警不报）
-db.execute("INSERT INTO messages (id,conversation_id,from_kind,from_id,text,created_at) VALUES ('m1','c1','agent','ag1','早',?)", (iso(120),))
+db.execute("INSERT INTO messages (id,conversation_id,from_kind,from_id,text,created_at) VALUES ('m1','c1','agent','ag1','早',?)", (iso(80),))
 db.execute("INSERT INTO messages (id,conversation_id,from_kind,from_id,text,created_at) VALUES ('m2','c1','agent','ag2','近',?)", (iso(10),))
 db.commit()
 print("seed ok")
@@ -109,7 +111,8 @@ if code401 != "401": print(f"FAIL: 无 token 应 401，实际 {code401}"); ok = 
 if rule_agent != "403": print(f"FAIL: agent token 改规则应 403，实际 {rule_agent}"); ok = False
 # 规则默认值
 r = d.get("rules")
-want = {"heartbeat_max_min": 30, "latency_p95_max_s": 1800, "zero_window_s": 3600, "failures_max": 0}
+want = {"heartbeat_max_min": 30, "latency_p95_max_s": 1800, "zero_window_s": 3600, "failures_max": 0,
+        "stale_delivery_max": 0, "stale_hours": 6}
 if r != want: print(f"FAIL: 默认规则 {r} != {want}"); ok = False
 # 告警恰好两条：heartbeat_stale(乙) + latency_p95_high；不能有 throughput_zero / failures_positive / 甲的 heartbeat
 alerts = d.get("alerts")

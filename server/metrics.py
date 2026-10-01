@@ -12,13 +12,16 @@
    「最近 1 小时投递的新消息」当作未取走上界。字段 window_s 注明窗口。
    返回：{"<agent_name>": {"count": int, "window_s": 3600}, ...}（用名字做键，方便人看）。
 
-2. delivery_latency_s（投递延迟）
+2. delivery_latency_s（投递延迟，只统计已被取走的消息）
    样本：最近 100 条消息（按 seq 倒序）。对每条消息的「该收的人」（会话中除发送者外的
    每个成员）取一个样本：
        延迟 = 接收方 presence.last_seen − 消息 created_at（秒）
-   背景：服务端不记录取走时刻，只能用接收方最后一次心跳作为「已经取走」的时间上界；
-   心跳早于消息写入的（可能还没取走）跳过。样本为 0 个 → median/p95 都是 null。
-   返回：{"median_s": float|null, "p95_s": float|null, "n": int}。
+   背景：服务端不记录取走时刻，只能用接收方最后一次心跳作为「已经取走」的时间上界。
+   判定「已被取走」：心跳晚于消息写入，且 心跳 − 写入 ≤ PICKUP_MAX_S（3600 秒）。
+   写入后超过 1 小时才有心跳的，视为离线补投/一直没取走，不计入延迟样本——
+   它们由第 5 条 stale_delivery 指标统计（#15 拆开两条口径，防止 p95 被无人取走的消息污染）。
+   样本为 0 个 → median/p95 都是 null。
+   返回：{"median_s": float|null, "p95_s": float|null, "n": int, "pickup_max_s": 3600}。
 
 3. failures（失败/异常，最近 24 小时）
    两个来源求和：
@@ -31,6 +34,12 @@
 4. throughput_hourly（吞吐）
    最近 24 个完整 UTC 小时（含当前小时）每小时 messages 写入条数，缺失小时补 0。
    返回：{"YYYY-MM-DDTHH": int, ...} 恰好 24 个键（键是 UTC 小时起点）。
+
+5. stale_delivery（超时未取走，#15 新增）
+   写入超过 stale_hours 小时（默认 6）、且没有任何接收方在写入后活跃过
+   （presence.last_seen ≥ created_at）的消息——一直没人取走。
+   只对「会话里有 agent 接收方」的消息判（human 发的一对一会话若只有人收，不算）。
+   返回：{"count": int, "oldest_created_at": str|null, "stale_hours": number}。
 
 注入约定同 api_v1.py：main.py 调 attach(db=, lock=, user_token=, q=, q1=, ex=, ...)。
 本模块只读（q / q1），不写库、不加锁。
@@ -135,8 +144,11 @@ def _backlog(now: datetime) -> Dict[str, Dict[str, object]]:
     return out
 
 
+PICKUP_MAX_S = 3600  # 「已被取走」判定窗口（秒）：写入 → 心跳超过它，视为一直没取走（#15）
+
+
 def _latency(now: datetime) -> Dict[str, object]:
-    """最近 100 条消息的投递延迟中位数/p95（取走上界估计，见文件头口径 2）。"""
+    """最近 100 条消息的投递延迟中位数/p95（只统计已被取走的，见文件头口径 2）。"""
     rows = _q(
         """SELECT m.seq, m.conversation_id, m.from_id, m.created_at
            FROM messages m ORDER BY m.seq DESC LIMIT 100"""
@@ -155,9 +167,42 @@ def _latency(now: datetime) -> Dict[str, object]:
                 continue
             seen_dt = _parse_ts(seen)
             if seen_dt is None or seen_dt < created:
-                continue  # 心跳早于写入：可能还没取走，跳过
-            samples.append((seen_dt - created).total_seconds())
-    return {"median_s": _median(samples), "p95_s": _p95(samples), "n": len(samples)}
+                continue  # 心跳早于写入：还没取走，跳过
+            lag = (seen_dt - created).total_seconds()
+            if lag > PICKUP_MAX_S:
+                continue  # 写入后超窗口才有心跳：离线补投/没取走，不计延迟（#15）
+            samples.append(lag)
+    return {"median_s": _median(samples), "p95_s": _p95(samples), "n": len(samples),
+            "pickup_max_s": PICKUP_MAX_S}
+
+
+def _stale_delivery(now: datetime, stale_hours: float = 6) -> Dict[str, object]:
+    """超时未取走的消息（#15，见文件头口径 5）。"""
+    cutoff = (now - timedelta(hours=stale_hours)).isoformat(timespec="seconds")
+    rows = _q(
+        """SELECT m.seq, m.conversation_id, m.from_id, m.created_at
+           FROM messages m WHERE m.created_at < ? ORDER BY m.seq ASC""",
+        (cutoff,),
+    )
+    pres = {r["agent_id"]: r["last_seen"] for r in _q("SELECT agent_id, last_seen FROM presence")}
+    stale: List[str] = []
+    for r in rows:
+        recvs = _q("SELECT agent_id FROM members WHERE conversation_id = ? AND agent_id != ?",
+                   (r["conversation_id"], r["from_id"]))
+        if not recvs:
+            continue  # 没有 agent 接收方的会话（纯人）不判未取走
+        taken = False
+        for rec in recvs:
+            seen = pres.get(rec["agent_id"])
+            seen_dt = _parse_ts(seen) if seen else None
+            created = _parse_ts(r["created_at"])
+            if seen_dt is not None and created is not None and seen_dt >= created:
+                taken = True
+                break
+        if not taken:
+            stale.append(r["created_at"])
+    return {"count": len(stale), "oldest_created_at": stale[0] if stale else None,
+            "stale_hours": stale_hours}
 
 
 def _failures(now: datetime) -> Dict[str, int]:
@@ -213,6 +258,7 @@ def v1_metrics(who: Dict[str, str] = Depends(me)) -> Dict[str, object]:  # type:
         "at": now.isoformat(timespec="seconds"),
         "backlog": _backlog(now),
         "delivery_latency_s": _latency(now),
+        "stale_delivery": _stale_delivery(now),
         "failures": _failures(now),
         "throughput_hourly": _throughput(now),
     }
