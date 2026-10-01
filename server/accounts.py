@@ -25,15 +25,96 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
+import re
 import secrets
 import sqlite3
+import subprocess
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 router = APIRouter()
+
+# ---------------------------------------------------------------- 注册防刷（#17）
+# 最小两道防线：注册限流（每 IP 每小时 ≤3 / 每天 ≤10）+ 邮箱校验（格式 + 一次性邮箱黑名单）。
+# 可选邀请码：环境变量 HUB_INVITE_CODE 设了就必须带对，不设则开放。
+# 所有拦截写一行日志（stdout；另配 HUB_GUARD_EVENTS_URL/TOKEN 时顺手上报事件流）。
+
+_EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+_DISPOSABLE_DOMAINS = {
+    "mailinator.com", "tempmail.com", "10minutemail.com", "guerrillamail.com",
+    "trashmail.com", "yopmail.com", "tempmail.ninja", "throwawaymail.com",
+    "sharklasers.com", "grr.la", "mailnesia.com", "dispostable.com",
+    "temp-mail.org", "emailondeck.com", "mohmal.com", "maildrop.cc",
+    "getnada.com", "nada.email", "mail.tm", "0wnd.net", "crazymailing.com",
+    "wegwerfmail.de", "temporary-mail.net", "spambox.us", "mailcatch.com",
+}
+HUB_INVITE_CODE = os.environ.get("HUB_INVITE_CODE", "").strip()
+
+_RATE_LOCK = threading.Lock()
+_RATE: Dict[str, List[float]] = {}   # ip -> 最近 24h 的注册尝试时刻（含被拒的）
+
+
+def _client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _log_block(ip: str, reason: str, email: str = "") -> None:
+    """拦截日志：一行 stdout；配了 HUB_GUARD_EVENTS_URL/TOKEN 再顺手 POST 事件（失败静默）。"""
+    line = "[guard] 拦截注册 ip=%s reason=%s email=%s" % (ip, reason, email)
+    print(line, flush=True)
+    url = os.environ.get("HUB_GUARD_EVENTS_URL", "").strip()
+    tok = os.environ.get("HUB_GUARD_EVENTS_TOKEN", "").strip()
+    if url and tok:
+        try:
+            subprocess.run(
+                ["curl", "-s", "-m", "2", "-o", "/dev/null", "-X", "POST", url,
+                 "-H", "Authorization: Bearer " + tok, "-H", "Content-Type: application/json",
+                 "--data-binary", json.dumps({"agent": "warm-hub", "kind": "告警",
+                                              "text": line}, ensure_ascii=False)],
+                timeout=3,
+            )
+        except Exception:
+            pass
+
+
+def _check_rate(ip: str) -> None:
+    """同一来源 IP：每小时 ≤3 次、每天 ≤10 次注册；超限 429 + Retry-After。"""
+    now = time.time()
+    with _RATE_LOCK:
+        hits = [t for t in _RATE.get(ip, []) if now - t < 3600 * 24]
+        hour = [t for t in hits if now - t < 3600]
+        if len(hour) >= 3:
+            retry = int(3600 - (now - hour[0])) + 1
+            _log_block(ip, "注册限流:每小时超3次")
+            raise HTTPException(status_code=429, detail="注册太频繁，稍后再试",
+                                headers={"Retry-After": str(retry)})
+        if len(hits) >= 10:
+            retry = int(3600 * 24 - (now - hits[0])) + 1
+            _log_block(ip, "注册限流:每天超10次")
+            raise HTTPException(status_code=429, detail="今天注册次数用完了，明天再试",
+                                headers={"Retry-After": str(retry)})
+        hits.append(now)
+        _RATE[ip] = hits
+
+
+def _email_error(email: str) -> Optional[str]:
+    """返回错误文案；None = 通过。"""
+    email = email.strip().lower()
+    if not email or len(email) > 254 or not _EMAIL_RE.match(email):
+        return "邮箱格式不对"
+    if email.rsplit("@", 1)[-1] in _DISPOSABLE_DOMAINS:
+        return "一次性邮箱不支持，请用常用邮箱"
+    return None
 
 # 固定默认账号：加列后已存在的 agents/conversations 都归到它名下（人 token 的老数据不丢）
 DEFAULT_ACCOUNT_ID = "acct_default"
@@ -196,6 +277,7 @@ def make_conv_access(conn: sqlite3.Connection):
 class RegisterIn(BaseModel):
     email: str = Field(..., min_length=3, max_length=254)
     password: str = Field(..., min_length=6, max_length=128)
+    invite_code: Optional[str] = None
 
 
 class LoginIn(BaseModel):
@@ -229,12 +311,24 @@ def _require_account(conn, authorization: Optional[str]) -> str:
 
 @router.post("/api/accounts/register")
 def register(
-    body: RegisterIn, authorization: Optional[str] = Header(default=None)
+    body: RegisterIn,
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
 ) -> Dict[str, str]:
     import main as _m  # 延迟 import，避免模块加载顺序问题
 
     conn = _m._db
+    ip = _client_ip(request)
     email = body.email.strip().lower()
+    err = _email_error(email)           # ① 邮箱：格式 + 一次性邮箱黑名单（不计限流——刷不出账号）
+    if err:
+        _log_block(ip, err, email)
+        raise HTTPException(status_code=400, detail=err)
+    if HUB_INVITE_CODE:                 # ② 邀请码：设了就必带，带错 403（不计限流）
+        if (body.invite_code or "").strip() != HUB_INVITE_CODE:
+            _log_block(ip, "邀请码不对", email)
+            raise HTTPException(status_code=403, detail="邀请码不对")
+    _check_rate(ip)                     # ③ 限流：每 IP 每小时 ≤3 / 每天 ≤10（只卡能产出账号的尝试）
     if conn.execute("SELECT 1 FROM accounts WHERE email = ?", (email,)).fetchone():
         raise HTTPException(status_code=409, detail="这个邮箱已注册")
     account_id = "acct_%s" % secrets.token_hex(6)
