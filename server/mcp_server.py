@@ -15,6 +15,9 @@
 - list_conversations 读 conversations + members（agent 只看到自己参与的会话）。
 - 按次计费骨架保留：额度表 mcp_calls 建在**共享库**里（不是独立库文件），
   MCP_FREE_CALLS 默认 100，超额 HTTP 402 + paymentId + accepts；只收 tools/call。
+- #22 付费骨架：超额时 payment_intents 表（共享库）落一行 pending
+  （id/account_id/tool/amount=0.001/status/created_at，paymentId 即 id，不真上链）；
+  新增 paid_status 工具查自己的支付意图，免计费（额度用尽也能查）。
 
 接线说明：main.py 现在 include_router(mcp_server.router) 时没调 attach；本模块在
 state 为空时回退用 api_v1._S（main.py 已在启动时给 api_v1 attach 好同一套
@@ -126,6 +129,29 @@ def _consume_quota(account_id: str, free: int) -> bool:
         return True
     except Exception:
         return True
+
+
+# ---------------------------------------------------------------- 支付意图（#22 骨架）
+
+def _record_payment_intent(payment_id: str, account_id: str, tool: str, amount: str) -> None:
+    """402 时落一行 pending 支付意图（共享库）；落账失败不阻塞 402（骨架）。"""
+    try:
+        _ex(
+            "CREATE TABLE IF NOT EXISTS payment_intents ("
+            " id TEXT PRIMARY KEY,"
+            " account_id TEXT NOT NULL,"
+            " tool TEXT NOT NULL,"
+            " amount TEXT NOT NULL,"
+            " status TEXT NOT NULL DEFAULT 'pending',"
+            " created_at TEXT NOT NULL)"
+        )
+        _ex(
+            "INSERT INTO payment_intents (id, account_id, tool, amount, status, created_at) "
+            "VALUES (?,?,?,?, 'pending', ?)",
+            (payment_id, account_id, tool, amount, _state()["now_iso"]()),  # type: ignore[operator]
+        )
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------- 会话/成员（对齐 /v1）
@@ -254,6 +280,36 @@ def _tool_fetch_inbox(args: dict, who: Dict[str, str]) -> dict:
     return {"messages": out, "latest": latest, "count": len(out)}
 
 
+def _tool_paid_status(args: dict, who: Dict[str, str]) -> dict:
+    """查自己的支付意图（免计费，额度用尽也能查）。"""
+    account_id = who["kind"] + ":" + who["id"]
+    try:
+        _ex(
+            "CREATE TABLE IF NOT EXISTS payment_intents ("
+            " id TEXT PRIMARY KEY,"
+            " account_id TEXT NOT NULL,"
+            " tool TEXT NOT NULL,"
+            " amount TEXT NOT NULL,"
+            " status TEXT NOT NULL DEFAULT 'pending',"
+            " created_at TEXT NOT NULL)"
+        )
+        rows = _q(
+            "SELECT id, tool, amount, status, created_at FROM payment_intents "
+            "WHERE account_id = ? ORDER BY created_at",
+            (account_id,),
+        )
+    except Exception:
+        rows = []
+    by_status: Dict[str, int] = {}
+    for r in rows:
+        by_status[r["status"]] = by_status.get(r["status"], 0) + 1
+    return {
+        "account_id": account_id,
+        "by_status": by_status,
+        "intents": [dict(r) for r in rows],
+    }
+
+
 def _tool_list_conversations(args: dict, who: Dict[str, str]) -> dict:
     if who["kind"] == "human":
         rows = _q("SELECT * FROM conversations ORDER BY created_at")
@@ -300,12 +356,18 @@ TOOLS = [
             },
         },
     },
+    {
+        "name": "paid_status",
+        "description": "查自己的支付意图记录（pending/总额；免计费，额度用尽也能查）",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
 ]
 
 _TOOL_FN = {
     "send_message": _tool_send_message,
     "list_conversations": _tool_list_conversations,
     "fetch_inbox": _tool_fetch_inbox,
+    "paid_status": _tool_paid_status,
 }
 
 
@@ -373,14 +435,17 @@ async def mcp_endpoint(request: Request):
     if not isinstance(method, str):
         return JSONResponse(status_code=200, content=_rpc_error(-32600, "invalid request", rid))
 
-    # 收费点：只收 tools/call
+    # 收费点：只收 tools/call；paid_status 免计费（额度用尽也能查支付状态）
     if method == "tools/call":
-        if not _consume_quota(who["kind"] + ":" + who["id"], _free_calls()):
+        name = (params or {}).get("name")
+        if name != "paid_status" and not _consume_quota(who["kind"] + ":" + who["id"], _free_calls()):
+            payment_id = "pay_" + uuid.uuid4().hex
+            _record_payment_intent(payment_id, who["kind"] + ":" + who["id"], name or "", "0.001")
             return JSONResponse(
                 status_code=402,
                 content={
                     "detail": "需要付费",
-                    "paymentId": "pay_" + uuid.uuid4().hex,
+                    "paymentId": payment_id,
                     "accepts": [
                         {"scheme": "exact", "amount": "0.001", "asset": "USDC",
                          "network": "eip155:196"}
