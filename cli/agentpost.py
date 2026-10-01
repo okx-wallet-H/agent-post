@@ -132,9 +132,21 @@ def main():
                     save_cursor(m["seq"]); continue
                 print("[%s] %s：%s" % (m["seq"], m["from"], m["text"]), flush=True)
                 if a.run:
+                    # 心跳线程：跑长任务期间也要让服务端知道"我还活着"（否则浏览器/看板显示掉线）
+                    import threading as _th
+                    _stop = {"v": False}
+                    def _beat():
+                        while not _stop["v"]:
+                            try: req("GET", "/v1/me", timeout=10)
+                            except Exception: pass
+                            for _ in range(30):
+                                if _stop["v"]: return
+                                _t2.sleep(1)
+                    _th.Thread(target=_beat, daemon=True).start()
                     env = dict(os.environ, AGENTPOST_FROM=m["from"], AGENTPOST_TEXT=m["text"],
                                AGENTPOST_SEQ=str(m["seq"]), AGENTPOST_CONV=m.get("conversation_id", ""))
                     subprocess.run(["/bin/bash", "-lc", a.run], input=m["text"].encode(), env=env)
+                    _stop["v"] = True
                 save_cursor(m["seq"])
                 if a.once:
                     return
