@@ -19,11 +19,12 @@
    since = 现在（该值本身是滚动估计，无单一事发时刻）。value = p95 秒。
    action：投递变慢，检查接收方是否在正常拉 inbox、积压（GET /v1/metrics）是否在涨。
 
-③ throughput_zero —— 吞吐掉到 0
-   判定：过去 24 小时内有消息（messages 非空），但最近 zero_window_s 秒（默认 3600）
-   一条新消息都没有。老库没消息不报（不算停摆，算没接入）。
-   since = 24h 窗口内最后一条消息的 created_at。value = 距最后一条消息的秒数。
-   action：近 1 小时无消息但 24h 内有流量，检查对接方发送链路是否停摆。
+③ throughput_zero —— 连续 zero_hours 小时（默认 3）无新消息才报（告警降噪改）
+   判定：过去 24 小时内有消息，但最近 zero_hours 小时一条都没有。
+   since = 24h 窗口内最后一条消息的 created_at。value = 距最后一条消息的小时数。
+   action：连续 N 小时无消息但 24h 内有流量，检查对接方发送链路是否停摆。
+   阈值理由：产品现在没人用的时候多，单个 1 小时空窗很常见（深夜、周末），
+   报出来是噪声；连续 3 小时全空才算「链路可能停摆」，值得看一眼。
 
 ④ failures_positive —— 失败计数 > 0
    判定：metrics 口径 3 的 failures.count（24h 内 from_kind 脏数据 + healthcheck FAIL 行）> failures_max。
@@ -36,8 +37,21 @@
    since = 最老一条未取走消息的 created_at。value = count。
    action：检查收件方是否接入/守候是否活着。
 
+各阈值默认值及理由：
+- heartbeat_max_min = 30：守候进程有 3s 自拉兜底，30 分钟没心跳基本就是挂了；
+  比 30 小（如 10 分钟）会把网络抖动当故障。
+- latency_p95_max_s = 1800：延迟用接收方心跳做取走上界估计，30 分钟是「投了
+  半小时还没被取走」的线，再慢就该查接收方拉取节奏；阈值下限受心跳粒度限制。
+- zero_hours = 3：见 ③，单个 1 小时空窗是正常没人用，连续 3 小时全空才报。
+- failures_max = 0：failures 只计脏数据与 healthcheck FAIL 行，正常时就是 0，
+  任何非零都值得查，不降噪。
+- stale_delivery_max = 0 / stale_hours = 24（告警降噪改）：原 6 小时对低频使用者
+  太紧——晚上或周末发的消息隔天取很常见，6 小时未取走报出来是噪声；放宽到
+  24 小时没人取走才像「接收方没接入/守候挂了」。且守候挂掉本身 30 分钟就会被
+  ① 抓到，这条只兜「人不在、消息没人取」的积压，24 小时起报不丢事。
+
 阈值规则（POST /v1/alerts/rule，人 token）：heartbeat_max_min / latency_p95_max_s /
-zero_window_s / failures_max / stale_delivery_max / stale_hours，可只传要改的字段。
+zero_hours / failures_max / stale_delivery_max / stale_hours，可只传要改的字段。
 规则存内存（_S["rules"]），服务重启回默认值——持久化等有需要再接库。
 
 注入约定同 api_v1.py / metrics.py：main.py 调 attach(db=, lock=, user_token=, q=, q1=, ex=, ...)。
@@ -61,10 +75,10 @@ _S: Dict[str, object] = {}
 DEFAULT_RULES = {
     "heartbeat_max_min": 30,     # ① 心跳超时（分钟）
     "latency_p95_max_s": 1800,   # ② 延迟 p95 阈值（秒）
-    "zero_window_s": 3600,       # ③ 吞吐为 0 的观察窗口（秒）
+    "zero_hours": 3,             # ③ 连续 N 小时全 0 才报吞吐停摆（小时，降噪改）
     "failures_max": 0,           # ④ 失败计数上限
     "stale_delivery_max": 0,     # ⑤ 超时未取走条数上限（#15）
-    "stale_hours": 6,            # ⑤ 未取走判定的小时数（#15）
+    "stale_hours": 24,           # ⑤ 未取走判定的小时数（#15；6→24 降噪改，理由见文件头）
 }
 
 
@@ -147,24 +161,24 @@ def _latency_alerts(now: datetime, rules: Dict[str, object]) -> List[Dict[str, o
 
 
 def _throughput_alerts(now: datetime, rules: Dict[str, object]) -> List[Dict[str, object]]:
-    win = int(rules["zero_window_s"])
+    hours = int(rules["zero_hours"])
     since_24h = (now - timedelta(hours=24)).isoformat(timespec="seconds")
-    since_win = (now - timedelta(seconds=win)).isoformat(timespec="seconds")
+    since_win = (now - timedelta(hours=hours)).isoformat(timespec="seconds")
     last24 = _q1("SELECT created_at FROM messages WHERE created_at >= ? ORDER BY seq DESC LIMIT 1", (since_24h,))
     if last24 is None:
         return []  # 24h 内没消息：不是停摆，是没接入（口径见文件头）
     recent = _q1("SELECT 1 FROM messages WHERE created_at >= ? LIMIT 1", (since_win,))
     if recent is not None:
-        return []
+        return []  # 最近 N 小时内有消息：不报（1 小时空窗是正常没人用）
     last = _parse_ts(last24["created_at"])
-    idle_s = round((now - last).total_seconds()) if last else None
+    idle_h = round((now - last).total_seconds() / 3600, 1) if last else None
     return [{
         "type": "throughput_zero",
         "subject": "全站",
-        "value": idle_s,
-        "threshold": float(win),
+        "value": idle_h,
+        "threshold": float(hours),
         "since": last24["created_at"],
-        "action": "近 1 小时无消息但 24h 内有流量，检查对接方发送链路是否停摆",
+        "action": f"连续 {hours} 小时无消息但 24h 内有流量，检查对接方发送链路是否停摆",
     }]
 
 
@@ -203,7 +217,7 @@ def _stale_alerts(now: datetime, rules: Dict[str, object]) -> List[Dict[str, obj
 class RuleIn(BaseModel):
     heartbeat_max_min: Optional[float] = None
     latency_p95_max_s: Optional[float] = None
-    zero_window_s: Optional[int] = None
+    zero_hours: Optional[int] = None
     failures_max: Optional[int] = None
     stale_delivery_max: Optional[int] = None
     stale_hours: Optional[float] = None
@@ -222,7 +236,7 @@ def v1_alerts(who: Dict[str, str] = Depends(me)) -> Dict[str, object]:  # type: 
 @router.post("/v1/alerts/rule")
 def v1_alerts_rule(body: RuleIn, who: Dict[str, str] = Depends(require_human)) -> Dict[str, object]:  # type: ignore[assignment]
     rules = dict(_rules())
-    for k in ("heartbeat_max_min", "latency_p95_max_s", "zero_window_s", "failures_max",
+    for k in ("heartbeat_max_min", "latency_p95_max_s", "zero_hours", "failures_max",
               "stale_delivery_max", "stale_hours"):
         v = getattr(body, k)
         if v is not None:

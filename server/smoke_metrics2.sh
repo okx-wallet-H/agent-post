@@ -1,7 +1,7 @@
 #!/bin/bash
 # smoke_metrics2.sh —— #15 投递口径拆两条的冒烟（临时库 + 临时端口）
 # 造 3 条消息：m1 被取走（乙 5 分钟前心跳，延迟 300s ≤ 取走窗口 3600s）；
-#             m2/m3 发给丙（丙从未心跳）→ 超 6 小时没人取。
+#             m2/m3 发给丙（丙从未心跳）→ 超 24 小时没人取（alerts 默认 stale_hours=24，降噪改）。
 # 断言：/v1/metrics 的 delivery_latency_s.n == 1（延迟只算被取走的）；
 #       stale_delivery.count == 2、oldest 是 m3 的写入时间；
 #       /v1/alerts 触发 stale_delivery 告警（action 写明检查收件方/守候），
@@ -55,9 +55,9 @@ db.execute("INSERT INTO members VALUES ('c2','ag3')")
 # m1：10 分钟前 甲→乙；乙 5 分钟前心跳 → 已取走（延迟 300s）
 db.execute("INSERT INTO messages (id,conversation_id,from_kind,from_id,text,created_at) VALUES ('m1','c1','agent','ag1','收',?)", (iso(min_ago=10),))
 db.execute("INSERT INTO presence VALUES ('ag2',?)", (iso(min_ago=5),))
-# m2/m3：8/7 小时前 甲→丙；丙从未心跳 → 没人取
-db.execute("INSERT INTO messages (id,conversation_id,from_kind,from_id,text,created_at) VALUES ('m3','c2','agent','ag1','旧2',?)", (iso(hours_ago=8),))
-db.execute("INSERT INTO messages (id,conversation_id,from_kind,from_id,text,created_at) VALUES ('m2','c2','agent','ag1','旧1',?)", (iso(hours_ago=7),))
+# m2/m3：26/25 小时前 甲→丙；丙从未心跳 → 超 stale_hours=24 没人取
+db.execute("INSERT INTO messages (id,conversation_id,from_kind,from_id,text,created_at) VALUES ('m3','c2','agent','ag1','旧2',?)", (iso(hours_ago=26),))
+db.execute("INSERT INTO messages (id,conversation_id,from_kind,from_id,text,created_at) VALUES ('m2','c2','agent','ag1','旧1',?)", (iso(hours_ago=25),))
 db.commit()
 print("seed ok")
 PY
@@ -133,7 +133,7 @@ other = [x for x in al if x.get("type") != "stale_delivery"]
 if other:
     print(f"FAIL: 不应有其他告警：{[(x.get('type')) for x in other]}"); ok = False
 rr = json.loads(rule).get("rules", {})
-if rr.get("stale_delivery_max") != 5 or rr.get("stale_hours") != 6:
+if rr.get("stale_delivery_max") != 5 or rr.get("stale_hours") != 24:
     print(f"FAIL: 改规则返回 {rr}"); ok = False
 a2_alerts = json.loads(a2).get("alerts", [])
 if any(x.get("type") == "stale_delivery" for x in a2_alerts):

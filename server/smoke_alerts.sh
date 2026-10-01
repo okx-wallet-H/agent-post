@@ -4,7 +4,10 @@
 #           延迟 p95 超阈（消息 80 分钟前写入、乙心跳 35 分钟前 → 上界 45 分钟 = 2700s，落在
 #           取走窗口 3600s 内、按 #15 新口径算延迟，且 > 1800s）→ 应报 latency_p95_high；
 #           最近 1 小时有消息 → throughput_zero 不报；无脏数据无 FAIL → failures_positive 不报；
-#           无超过 stale_hours=6 的未取走消息 → stale_delivery 不报。
+#           无超过 stale_hours=24 的未取走消息 → stale_delivery 不报。
+# 告警降噪两条新断言：① 删掉最近 1 小时内的 m2（只有 1 个小时零，不足 zero_hours=3）→
+#           throughput_zero 不报；② 把 m1 挪到 4.5 小时前（连续 3 个 1 小时零）→
+#           throughput_zero 报（此时延迟样本超 3600s 取走窗，latency 无样本不报）。
 # 断言：alerts 恰好 [heartbeat_stale(乙), latency_p95_high]，规则默认值对；POST /v1/alerts/rule
 #       人 token 改阈值生效、agent token 403。
 # 跑法： bash smoke_alerts.sh；SMOKE_PORT=8803 bash smoke_alerts.sh（换端口）
@@ -89,21 +92,44 @@ done
 BODY=$(curl -s --max-time 5 -H "Authorization: Bearer humantok" "http://127.0.0.1:$PORT/v1/alerts")
 CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H "Authorization: Bearer humantok" "http://127.0.0.1:$PORT/v1/alerts")
 CODE401=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$PORT/v1/alerts")
+# ① 只有 1 个小时零：删掉最近 1 小时内的 m2 → throughput_zero 不应报
+"$PY" - "$TMP/smoke.db" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute("DELETE FROM messages WHERE id='m2'")
+db.commit()
+print("m2 已删（只有 1 个小时零，不足 zero_hours=3）")
+PY
+ZERO1=$(curl -s --max-time 5 -H "Authorization: Bearer humantok" "http://127.0.0.1:$PORT/v1/alerts")
+# ② 连续 3 个 1 小时零：m1 挪到 4.5 小时前 → throughput_zero 应报
+"$PY" - "$TMP/smoke.db" <<'PY'
+import sqlite3, sys, datetime
+db = sqlite3.connect(sys.argv[1])
+ts = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=4, minutes=30)).isoformat(timespec="seconds")
+db.execute("UPDATE messages SET created_at=? WHERE id='m1'", (ts,))
+db.commit()
+print("m1 已挪到 4.5 小时前（最近 3 小时连续零）")
+PY
+ZERO2=$(curl -s --max-time 5 -H "Authorization: Bearer humantok" "http://127.0.0.1:$PORT/v1/alerts")
 RULE_BODY=$(curl -s --max-time 5 -X POST -H "Authorization: Bearer humantok" -H "Content-Type: application/json" \
-    -d '{"heartbeat_max_min": 10, "latency_p95_max_s": 6000}' "http://127.0.0.1:$PORT/v1/alerts/rule")
+    -d '{"heartbeat_max_min": 10, "latency_p95_max_s": 6000, "zero_hours": 24}' "http://127.0.0.1:$PORT/v1/alerts/rule")
 RULE_AGENT=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X POST -H "Authorization: Bearer tok1" -H "Content-Type: application/json" \
     -d '{"heartbeat_max_min": 10}' "http://127.0.0.1:$PORT/v1/alerts/rule")
 AFTER_BODY=$(curl -s --max-time 5 -H "Authorization: Bearer humantok" "http://127.0.0.1:$PORT/v1/alerts")
 
 echo "--- GET /v1/alerts（人 token）---"
 echo "$BODY"
+echo "--- 删 m2 后（1 小时零，应不报吞吐）---"
+echo "$ZERO1"
+echo "--- m1 挪到 4.5h 前（连续 3 小时零，应报吞吐）---"
+echo "$ZERO2"
 echo "--- POST /v1/alerts/rule 后 ---"
 echo "$RULE_BODY"
 echo "$AFTER_BODY"
 
-"$PY" - "$BODY" "$CODE" "$CODE401" "$RULE_BODY" "$RULE_AGENT" "$AFTER_BODY" <<'PY'
+"$PY" - "$BODY" "$CODE" "$CODE401" "$ZERO1" "$ZERO2" "$RULE_BODY" "$RULE_AGENT" "$AFTER_BODY" <<'PY'
 import json, sys
-body, code, code401, rule_body, rule_agent, after_body = sys.argv[1:]
+body, code, code401, zero1, zero2, rule_body, rule_agent, after_body = sys.argv[1:]
 ok = True
 d = json.loads(body)
 if code != "200": print(f"FAIL: GET HTTP {code} != 200"); ok = False
@@ -111,8 +137,8 @@ if code401 != "401": print(f"FAIL: 无 token 应 401，实际 {code401}"); ok = 
 if rule_agent != "403": print(f"FAIL: agent token 改规则应 403，实际 {rule_agent}"); ok = False
 # 规则默认值
 r = d.get("rules")
-want = {"heartbeat_max_min": 30, "latency_p95_max_s": 1800, "zero_window_s": 3600, "failures_max": 0,
-        "stale_delivery_max": 0, "stale_hours": 6}
+want = {"heartbeat_max_min": 30, "latency_p95_max_s": 1800, "zero_hours": 3, "failures_max": 0,
+        "stale_delivery_max": 0, "stale_hours": 24}
 if r != want: print(f"FAIL: 默认规则 {r} != {want}"); ok = False
 # 告警恰好两条：heartbeat_stale(乙) + latency_p95_high；不能有 throughput_zero / failures_positive / 甲的 heartbeat
 alerts = d.get("alerts")
@@ -125,9 +151,27 @@ if hb.get("since") is None or "检查 agentpost@乙" not in hb.get("action", "")
 if hb.get("value", 0) < 30: print(f"FAIL: 乙心跳过期分钟数 {hb.get('value')} 应 ≥30"); ok = False
 lat = next((a for a in alerts if a["type"] == "latency_p95_high"), {})
 if lat.get("value", 0) <= 1800: print(f"FAIL: p95 {lat.get('value')} 应 > 1800"); ok = False
-# 改阈值后：heartbeat_max_min=10 → 甲（1 分钟前）不报、乙仍报；latency 阈值 6000（> 5100）→ 不报
+# 降噪断言①：只有 1 个小时零（m2 已删，m1 在 80 分钟前）→ 不报 throughput_zero
+z1 = json.loads(zero1)
+t1 = [(a.get("type"), a.get("subject")) for a in z1.get("alerts", [])]
+if ("throughput_zero", "全站") in t1:
+    print(f"FAIL: 只有 1 个小时零不应报吞吐，实际 {t1}"); ok = False
+elif t1 != [("heartbeat_stale", "乙"), ("latency_p95_high", "全站")]:
+    print(f"FAIL: 1 小时零场景告警 {t1} 应为乙心跳+延迟两条"); ok = False
+# 降噪断言②：连续 3 个 1 小时零（m1 挪到 4.5h 前）→ 报 throughput_zero
+#（m1 延迟上界超 3600s 取走窗，latency 无样本不报）
+z2 = json.loads(zero2)
+t2 = [(a.get("type"), a.get("subject")) for a in z2.get("alerts", [])]
+if t2 != [("heartbeat_stale", "乙"), ("throughput_zero", "全站")]:
+    print(f"FAIL: 连续 3 小时零应报 [乙心跳, 吞吐]，实际 {t2}"); ok = False
+else:
+    tz = next(a for a in z2["alerts"] if a["type"] == "throughput_zero")
+    if tz.get("value", 0) < 3: print(f"FAIL: 吞吐 value {tz.get('value')} 小时应 ≥3"); ok = False
+    if tz.get("threshold") != 3: print(f"FAIL: 吞吐 threshold {tz.get('threshold')} 应为 3"); ok = False
+# 改阈值后：heartbeat_max_min=10 → 甲（1 分钟前）不报、乙仍报；latency 阈值 6000 无样本不报；
+# zero_hours=24 → m1 在 4.5h 前，最近 24h 内有消息不报吞吐
 rr = json.loads(rule_body).get("rules", {})
-if rr.get("heartbeat_max_min") != 10 or rr.get("latency_p95_max_s") != 6000:
+if rr.get("heartbeat_max_min") != 10 or rr.get("latency_p95_max_s") != 6000 or rr.get("zero_hours") != 24:
     print(f"FAIL: 改阈值返回 {rr}"); ok = False
 after = json.loads(after_body)
 a_types = [(a.get("type"), a.get("subject")) for a in after.get("alerts", [])]
