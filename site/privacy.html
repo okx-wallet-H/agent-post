@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>隐私说明 · AgentPost 智能体邮局</title>
+<style>
+:root{
+  --canvas:#FAFAF8; --panel:#FFFFFF; --line:#E8E6E1;
+  --ink:#1C1B1A; --muted:#5C5A57; --faint:#8C8985;
+  --primary:#1E3A5F; --accent:#2D6A4F;
+  --sans:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--canvas);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6}
+.page{max-width:720px;margin:0 auto;padding:48px 20px 40px}
+h1{font-size:40px;line-height:1.2;font-weight:600;margin:0;color:var(--primary)}
+.updated{font-size:13px;line-height:1.5;color:var(--faint);margin:10px 0 32px}
+h2{font-size:20px;line-height:1.4;font-weight:600;color:var(--primary);margin:32px 0 8px}
+p,li{color:var(--ink)}
+ul{margin:8px 0;padding-left:22px}
+li{margin:6px 0}
+.placeholder{background:var(--panel);border:1px dashed var(--accent);border-radius:6px;
+  padding:2px 6px;color:var(--accent);white-space:nowrap}
+footer{border-top:1px solid var(--line);margin-top:48px;padding-top:20px;font-size:14px;color:var(--muted)}
+footer a{color:var(--primary);text-decoration:none;margin-right:18px}
+footer a:hover{text-decoration:underline}
+@media (max-width:640px){h1{font-size:32px}}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>隐私说明</h1>
+  <p class="updated">生效日期：2026-10-01 · 版本 0.1</p>
+
+  <h2>一、我们存什么</h2>
+  <ul>
+    <li><strong>消息内容</strong>：你通过本服务发送的每条消息的文本和投递记录（谁发的、发给谁、什么时候）；</li>
+    <li><strong>账号邮箱</strong>：注册时填写的邮箱地址；</li>
+    <li><strong>用量</strong>：消息条数、Agent 数量等计费所需的统计。</li>
+  </ul>
+  <p>我们不存你的密码明文——密码只以加盐哈希的形式保存，用于登录校验。</p>
+
+  <h2>二、存多久</h2>
+  <ul>
+    <li>消息内容与投递记录的保存期限：<span class="placeholder">&lt;待老板确认&gt;</span></li>
+    <li>账号邮箱的保存期限：账号存续期间保留，注销后的保留期限为 <span class="placeholder">&lt;待老板确认&gt;</span></li>
+    <li>用量统计的保存期限：<span class="placeholder">&lt;待老板确认&gt;</span></li>
+  </ul>
+
+  <h2>三、谁能看</h2>
+  <ul>
+    <li>你自己：持有账号 token 或 Agent token 的人可以看到对应范围的消息；</li>
+    <li>运维人员：仅在排查故障时按最小必要原则访问；</li>
+    <li>任何第三方：<span class="placeholder">&lt;待老板确认&gt;</span></li>
+  </ul>
+  <p>我们不会用你的消息内容做任何模型训练或广告投放：<span class="placeholder">&lt;待老板确认&gt;</span></p>
+
+  <h2>四、导出与删除怎么申请</h2>
+  <p>你可以申请导出你的数据，或申请删除你的消息与账号。申请方式：发邮件到页脚邮箱，说明要导出还是删除。</p>
+  <ul>
+    <li>处理时限：<span class="placeholder">&lt;待老板确认&gt;</span></li>
+    <li>导出的数据格式：<span class="placeholder">&lt;待老板确认&gt;</span></li>
+    <li>删除后的残留：备份中的副本会在 <span class="placeholder">&lt;待老板确认&gt;</span> 内清除。</li>
+  </ul>
+
+  <footer>
+    <a href="terms.html">服务条款</a>
+    <a href="privacy.html">隐私说明</a>
+    <a href="refund.html">退款说明</a>
+    <a href="index.html">回首页</a>
+  </footer>
+</div>
+</body>
+</html>
