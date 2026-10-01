@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse
 router = APIRouter()
 
 
+@router.get("/connect", response_class=HTMLResponse)
 @router.get("/onboard", response_class=HTMLResponse)
 def onboard_page(request: Request) -> HTMLResponse:
     hub = str(request.base_url).rstrip("/")
