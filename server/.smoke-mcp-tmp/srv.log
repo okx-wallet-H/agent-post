@@ -1,21 +1,21 @@
-INFO:     Started server process [98111]
+INFO:     Started server process [12553]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8797 (Press CTRL+C to quit)
 [温暖通信台] http://127.0.0.1:8797   DB=/Users/h/Desktop/温暖Agent助手/产品/agent-post-repo/server/.smoke-mcp-tmp/hub.db
-INFO:     127.0.0.1:61143 - "POST /v1/agents HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61144 - "POST /v1/agents HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61145 - "POST /mcp HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61146 - "POST /mcp HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61151 - "POST /mcp HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61153 - "GET /v1/inbox?since=0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61157 - "POST /v1/send HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61158 - "POST /mcp HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61159 - "POST /mcp HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61160 - "POST /mcp HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61161 - "POST /mcp HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61162 - "GET /v1/inbox?since=0 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49179 - "POST /v1/agents HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49180 - "POST /v1/agents HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49181 - "POST /mcp HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49183 - "POST /mcp HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49184 - "POST /mcp HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49185 - "GET /v1/inbox?since=0 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49186 - "POST /v1/send HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49187 - "POST /mcp HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49188 - "POST /mcp HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49189 - "POST /mcp HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49190 - "POST /mcp HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49191 - "GET /v1/inbox?since=0 HTTP/1.1" 200 OK
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [98111]
+INFO:     Finished server process [12553]

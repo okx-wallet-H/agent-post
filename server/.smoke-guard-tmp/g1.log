@@ -1,18 +1,18 @@
-INFO:     Started server process [70711]
+INFO:     Started server process [12700]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8799 (Press CTRL+C to quit)
 [温暖通信台] http://127.0.0.1:8799   DB=/Users/h/Desktop/温暖Agent助手/产品/agent-post-repo/server/.smoke-guard-tmp/g1.db
 [guard] 拦截注册 ip=127.0.0.1 reason=邮箱格式不对 email=not-an-email
-INFO:     127.0.0.1:53079 - "POST /api/accounts/register HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:49219 - "POST /api/accounts/register HTTP/1.1" 400 Bad Request
 [guard] 拦截注册 ip=127.0.0.1 reason=一次性邮箱不支持，请用常用邮箱 email=a@mailinator.com
-INFO:     127.0.0.1:53080 - "POST /api/accounts/register HTTP/1.1" 400 Bad Request
-INFO:     127.0.0.1:53081 - "POST /api/accounts/register HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53082 - "POST /api/accounts/register HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53083 - "POST /api/accounts/register HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49220 - "POST /api/accounts/register HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:49221 - "POST /api/accounts/register HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49222 - "POST /api/accounts/register HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49223 - "POST /api/accounts/register HTTP/1.1" 200 OK
 [guard] 拦截注册 ip=127.0.0.1 reason=注册限流:每小时超3次 email=
-INFO:     127.0.0.1:53084 - "POST /api/accounts/register HTTP/1.1" 429 Too Many Requests
+INFO:     127.0.0.1:49224 - "POST /api/accounts/register HTTP/1.1" 429 Too Many Requests
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [70711]
+INFO:     Finished server process [12700]
