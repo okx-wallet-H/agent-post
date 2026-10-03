@@ -172,9 +172,13 @@ def _who(token: str) -> Optional[Dict[str, str]]:
     if token == _S.get("user_token"):
         return {"kind": "human", "id": "human", "name": "人"}
     row = _q1("SELECT id, name FROM agents WHERE token = ?", (token,))
-    if row is None:
-        return None
-    return {"kind": "agent", "id": row["id"], "name": row["name"]}
+    if row is not None:
+        return {"kind": "agent", "id": row["id"], "name": row["name"]}
+    # 账号 token（人在网页上用的那把）：只看得见自己名下的 Agent
+    acc = _q1("SELECT account_id FROM account_tokens WHERE token = ?", (token,))
+    if acc is not None:
+        return {"kind": "account", "id": acc["account_id"], "name": "人"}
+    return None
 
 
 def me(authorization: Optional[str] = Header(default=None)) -> Dict[str, str]:
@@ -242,9 +246,12 @@ class _View:
 
 # ---------------------------------------------------------------- /v1/board
 
-def _agents_block(v: _View, now: datetime) -> List[Dict[str, object]]:
+def _agents_block(v: _View, now: datetime, owner: Optional[str] = None) -> List[Dict[str, object]]:
     presence = _presence_map()
-    rows = _q("SELECT id, name, created_at FROM agents ORDER BY created_at")
+    if owner:
+        rows = _q("SELECT id, name, created_at FROM agents WHERE owner_account = ? ORDER BY created_at", (owner,))
+    else:
+        rows = _q("SELECT id, name, created_at FROM agents ORDER BY created_at")
     out: List[Dict[str, object]] = []
     for r in rows:
         aid = r["id"]
@@ -350,7 +357,7 @@ def v1_board(who: Dict[str, str] = Depends(me)) -> Dict[str, object]:  # type: i
     now = datetime.now(timezone.utc)
     v = _View()
     return {
-        "agents": _agents_block(v, now),
+        "agents": _agents_block(v, now, owner=(who.get("id") if who.get("kind") == "account" else None)),
         "timeline": _timeline_block(v),
         "usage": _usage_block(v, now),
         "server_time": _now_iso(),
