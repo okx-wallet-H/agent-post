@@ -134,6 +134,7 @@ def main():
                 if a.run:
                     # 心跳线程：跑长任务期间也要让服务端知道"我还活着"（否则浏览器/看板显示掉线）
                     import threading as _th
+                    import time as _t2
                     _stop = {"v": False}
                     def _beat():
                         while not _stop["v"]:
