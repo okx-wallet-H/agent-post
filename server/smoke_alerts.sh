@@ -137,7 +137,7 @@ if code401 != "401": print(f"FAIL: 无 token 应 401，实际 {code401}"); ok = 
 if rule_agent != "403": print(f"FAIL: agent token 改规则应 403，实际 {rule_agent}"); ok = False
 # 规则默认值
 r = d.get("rules")
-want = {"heartbeat_max_min": 30, "latency_p95_max_s": 1800, "zero_hours": 720,   # 无用户阶段默认静音（2026-10-03）；有用户后调回 12 "failures_max": 0,
+want = {"heartbeat_max_min": 30, "latency_p95_max_s": 1800, "zero_hours": 3, "failures_max": 0,
         "stale_delivery_max": 0, "stale_hours": 24}
 if r != want: print(f"FAIL: 默认规则 {r} != {want}"); ok = False
 # 告警恰好两条：heartbeat_stale(乙) + latency_p95_high；不能有 throughput_zero / failures_positive / 甲的 heartbeat

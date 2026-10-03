@@ -59,6 +59,7 @@ zero_hours / failures_max / stale_delivery_max / stale_hours，可只传要改�
 """
 
 from __future__ import annotations
+import os
 
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -75,7 +76,7 @@ _S: Dict[str, object] = {}
 DEFAULT_RULES = {
     "heartbeat_max_min": 30,     # ① 心跳超时（分钟）
     "latency_p95_max_s": 1800,   # ② 延迟 p95 阈值（秒）
-    "zero_hours": 720,   # 无用户阶段静音（有真实用户后调回 12 或 3，见 devlog 2026-10-03）             # ③ 连续 N 小时全 0 才报吞吐停摆（小时，降噪改）
+    "zero_hours": int(os.environ.get("ALERTS_ZERO_HOURS", 3)),  # 生产用 ALERTS_ZERO_HOURS 覆盖（无用户阶段静音）   # 无用户阶段静音（有真实用户后调回 12 或 3，见 devlog 2026-10-03）             # ③ 连续 N 小时全 0 才报吞吐停摆（小时，降噪改）
     "failures_max": 0,           # ④ 失败计数上限
     "stale_delivery_max": 0,     # ⑤ 超时未取走条数上限（#15）
     "stale_hours": 24,           # ⑤ 未取走判定的小时数（#15；6→24 降噪改，理由见文件头）
