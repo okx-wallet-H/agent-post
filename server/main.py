@@ -203,6 +203,16 @@ try:
 except Exception as _e:
     print("alerts 挂载失败：", _e)
 
+# 帮助页（/help）：把接入文档变成一页
+try:
+    import help_page
+    if hasattr(help_page, "attach"):
+        help_page.attach(db=_db, lock=_db_lock, user_token=USER_TOKEN, q=q, q1=q1, ex=ex,
+                         new_id=new_id, now_iso=now_iso, new_token=lambda: secrets.token_urlsafe(24))
+    app.include_router(help_page.router)
+except Exception as _e:
+    print("help_page 挂载失败：", _e)
+
 # 自助接入页（/connect）：三步拿到 token 并发出第一条
 try:
     import onboard
