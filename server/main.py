@@ -203,6 +203,16 @@ try:
 except Exception as _e:
     print("alerts 挂载失败：", _e)
 
+# A2A 薄适配层（AgentCard + POST /a2a）：对外标准入口
+try:
+    import a2a
+    if hasattr(a2a, "attach"):
+        a2a.attach(db=_db, lock=_db_lock, user_token=USER_TOKEN, q=q, q1=q1, ex=ex,
+                   new_id=new_id, now_iso=now_iso, new_token=lambda: secrets.token_urlsafe(24))
+    app.include_router(a2a.router)
+except Exception as _e:
+    print("a2a 挂载失败：", _e)
+
 # 登录会话（一次性登录码 + cookie）：手机免粘 token
 try:
     import session
