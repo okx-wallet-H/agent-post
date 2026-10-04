@@ -117,6 +117,74 @@ def patrol_offset_minutes(me_name: str, me_id: str) -> int:
     return sum(ord(c) for c in (me_name or me_id or "?")) % 15
 
 
+# ---------------------------------------------------------------- 收件归档（补读落盘）
+# 补读消息不再整段灌进上下文（Agent-B 实锤：200 条原文只有 3 条有用），而是
+# append 到 $AGENTPOST_WORKDIR/收件/<日期>.md；上下文只给 ≤15 行短摘要 + 触发条原文。
+# AGENTPOST_GZIP_OLD=1 时顺带把 30 天前的收件文件 gzip（缺省关）。
+
+WORKDIR = os.path.expanduser(os.environ.get("AGENTPOST_WORKDIR", "~/.agentpost"))
+
+
+def _inbox_file() -> str:
+    d = os.path.join(WORKDIR, "收件")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        pass
+    return os.path.join(d, time.strftime("%Y-%m-%d") + ".md")
+
+
+def _append_inbox(messages: list) -> str:
+    """把消息按「seq / 谁发的 / 时间 / mentions / 正文」append 到当日收件文件，返回路径。"""
+    path = _inbox_file()
+    if not messages:
+        return path
+    lines = []
+    for c in messages:
+        mentions = "、".join(c.get("mentions") or []) or "无"
+        lines.append("## seq %s · %s · %s · @%s" % (c["seq"], c.get("from", "?"),
+                                                    str(c.get("ts", ""))[:16], mentions))
+        lines.append(c["text"])
+        lines.append("")
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except Exception as e:
+        print("⚠ 收件文件写不进去（%s）：%s" % (path, e), file=sys.stderr, flush=True)
+    if os.environ.get("AGENTPOST_GZIP_OLD", "") == "1":
+        _gzip_old()
+    return path
+
+
+def _gzip_old() -> None:
+    """把 30 天前的 收件/*.md 压成 .gz（跳过已压的；失败静默）。"""
+    import gzip
+    import glob
+    cutoff = time.time() - 30 * 86400
+    for p in glob.glob(os.path.join(WORKDIR, "收件", "*.md")):
+        if os.path.getmtime(p) < cutoff and not os.path.exists(p + ".gz"):
+            try:
+                with open(p, "rb") as fin, gzip.open(p + ".gz", "wb") as fout:
+                    fout.write(fin.read())
+                os.remove(p)
+            except Exception:
+                pass
+
+
+def _wake_brief(messages: list, trigger: dict, me_name: str, path: str) -> str:
+    """唤醒时的短上下文（≤15 行）：未读条数 + @我的/交付结论条数 + 收件文件路径 + 检索建议。"""
+    n = len(messages)
+    x = sum(1 for c in messages
+            if any(mm in ("all", "全体", "everyone") or mm == me_name
+                   for mm in (c.get("mentions") or [])))
+    y = sum(1 for c in messages
+            if any(k in c["text"] for k in ("交付：", "结论：", "方案：", "问题：", "异议：")))
+    return "\n".join([
+        "你有 %d 条未读（已存 %s）：其中 %d 条 @ 了你 / %d 条是交付或结论。" % (n, path, x, y),
+        "建议：rg -n \"@%s|交付：|结论：|问题：\" \"%s\"" % (me_name, path),
+        "触发本条的消息：",
+        "[%s] %s：%s" % (trigger["seq"], trigger["from"], trigger["text"][:200]),
+    ])
 def _patrol_brief(me_id, me_name):
     """巡视简报：①群消息摘要 ②待评议 ③分歧 + 巡视纪律。依赖 #31 的
     /v1/reviews/pending 与 /v1/conflicts（没好时标「取不到」，不炸）。"""
@@ -280,7 +348,8 @@ def main():
                     save_cursor(m["seq"])          # 已看但未唤醒：只推 seen 游标，wake 不动
                     _pending.append(m)             # 记进补读池，下次唤醒时一起给
                     continue
-                # 被 @（或单聊）→ 补读：自上次唤醒以来漏看的消息 + 本条，一起作为上下文喂给 Agent
+                # 被 @（或单聊）→ 补读落盘：漏看的消息 append 到 收件/<日期>.md，
+                # 上下文只给 ≤15 行短摘要；被 @ 的这条原文完整走 stdin 给到 Agent
                 ctx = list(_pending) + [m]
                 w = wake_cursor()
                 if w < m["seq"]:                   # 跨进程补读：用 wake 游标把漏看的重拉一遍
@@ -291,9 +360,10 @@ def main():
                     except SystemExit:
                         pass                       # 重拉失败也不空手：内存池兜底
                 _pending = []
-                ctx_text = "\n".join("[%s] %s（%s）：%s" % (c["seq"], c["from"], c.get("conversation", ""), c["text"])
-                                    for c in ctx)
-                print("[唤醒] 被消息叫醒：\n%s" % ctx_text, flush=True)
+                inbox_path = _append_inbox(ctx)
+                brief = _wake_brief(ctx, m, me_name, inbox_path)
+                trigger_text = "[seq %s] %s 说：\n%s" % (m["seq"], m["from"], m["text"])
+                print("[唤醒] 被消息叫醒：\n%s\n（完整未读已存 %s）" % (brief, inbox_path), flush=True)
                 if a.run:
                     # 心跳线程：跑长任务期间也要让服务端知道"我还活着"（否则浏览器/看板显示掉线）
                     import threading as _th
@@ -309,8 +379,8 @@ def main():
                     _th.Thread(target=_beat, daemon=True).start()
                     env = dict(os.environ, AGENTPOST_FROM=m["from"], AGENTPOST_TEXT=m["text"],
                                AGENTPOST_SEQ=str(m["seq"]), AGENTPOST_CONV=m.get("conversation_id", ""),
-                               AGENTPOST_CONTEXT=ctx_text)
-                    subprocess.run(["/bin/bash", "-lc", a.run], input=ctx_text.encode(), env=env)
+                               AGENTPOST_CONTEXT=brief, AGENTPOST_INBOX=inbox_path)
+                    subprocess.run(["/bin/bash", "-lc", a.run], input=trigger_text.encode(), env=env)
                     _stop["v"] = True
                 save_wake_cursor(m["seq"])
                 save_cursor(m["seq"])
