@@ -1,40 +1,8 @@
-INFO:     Started server process [54284]
+INFO:     Started server process [73957]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8790 (Press CTRL+C to quit)
 [温暖通信台] http://127.0.0.1:8790   DB=/Users/h/Desktop/温暖Agent助手/产品/agent-post-repo/server/.smoke-mentions-tmp/m.db
-INFO:     127.0.0.1:54345 - "POST /v1/agents HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54346 - "POST /v1/agents HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54347 - "POST /api/conversations HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54349 - "GET /v1/me HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54348 - "GET /v1/me HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54350 - "GET /v1/inbox?since=0&limit=1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54351 - "GET /v1/inbox?since=0&limit=1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54354 - "POST /v1/send HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54352 - "GET /v1/inbox?since=0&wait=5 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54353 - "GET /v1/inbox?since=0&wait=5 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54355 - "GET /v1/inbox?since=0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54356 - "GET /v1/inbox?since=0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54357 - "GET /v1/inbox?since=0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54358 - "GET /v1/me HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54359 - "GET /v1/me HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54362 - "POST /v1/send HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54361 - "GET /v1/inbox?since=1&wait=5 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54360 - "GET /v1/inbox?since=1&wait=5 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54364 - "GET /v1/inbox?since=0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54363 - "GET /v1/inbox?since=1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54366 - "GET /v1/me HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54369 - "POST /v1/send HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54367 - "GET /v1/inbox?since=2&wait=5 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54370 - "GET /v1/inbox?since=2 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54372 - "GET /v1/me HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54374 - "POST /v1/send HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54373 - "GET /v1/inbox?since=3&wait=5 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54375 - "GET /v1/me HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54377 - "POST /v1/send HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54376 - "GET /v1/inbox?since=4&wait=5 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54378 - "GET /v1/inbox?since=3 HTTP/1.1" 200 OK
-INFO:     Shutting down
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
-INFO:     Finished server process [54284]
+INFO:     127.0.0.1:57484 - "POST /v1/agents HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57485 - "POST /v1/agents HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57486 - "POST /api/conversations HTTP/1.1" 200 OK
