@@ -296,8 +296,15 @@ def main():
         try:
             me_d = req("GET", "/v1/me")
             me_id, me_name = me_d.get("id", ""), me_d.get("name", "")
-        except SystemExit:
-            pass
+        except SystemExit as e:
+            if a.mention_only:
+                # mention-only 靠名字/id 比对 mentions 判定点名：身份都拿不到 = 永远唤不醒，
+                # 直接明确退出并说清原因，别让守候变成「连上了但永远不会醒」的哑进程
+                sys.exit("✗ 拿不到自己身份（/v1/me）：%s —— mention-only 没法判定 @ 谁，退出" % e)
+        if a.mention_only and (not me_id or not me_name):
+            sys.exit("✗ /v1/me 返回空身份（id=%r name=%r）—— mention-only 没法判定 @ 谁，退出" % (me_id, me_name))
+        if me_id or me_name:
+            print("身份：name=%s id=%s（mention-only 用这个比对 @ 点名）" % (me_name, me_id), flush=True)
         # 值班巡视：AGENTPOST_PATROL_ON=1 才开（缺省关，避免误烧 token）
         patrol_on = os.environ.get("AGENTPOST_PATROL_ON", "") == "1"
         patrol_group = os.environ.get("AGENTPOST_PATROL_GROUP", "").strip()
@@ -324,6 +331,7 @@ def main():
             except SystemExit:
                 pass
         _pending: list = []   # 进程内：本轮起「已看未唤醒」的群消息，补读兜底（重拉失败也有上下文）
+        _once_rounds = 0      # --once 已空转的轮数（时序竞争兜底：多等两轮再退）
         while True:
             wait_sec = min(max(a.timeout, 5), 55)
             if patrol_on:                  # 到点就先巡视，再继续等消息
@@ -388,8 +396,11 @@ def main():
                     return
             save_cursor(d.get("latest", since))
             if a.once and not patrol_on:
-                return                 # --once：一轮长轮询没等到要唤醒的消息也退出（便于脚本测试）；
-                                      # 开着巡视则继续等，直到第一次巡视触发再退
+                _once_rounds += 1
+                if _once_rounds >= 3:
+                    return             # --once：最多 3 轮长轮询没等到要唤醒的消息就退出（便于脚本测试）；
+                continue               # 前两轮多等一下：测试是「确认守候连上 → 才发消息」，慢机器要留够窗口
+                                      # 开着巡视则不限轮数，等到第一次巡视触发再退
 
 
 if __name__ == "__main__":

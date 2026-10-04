@@ -1,9 +1,9 @@
-INFO:     Started server process [38778]
+INFO:     Started server process [57564]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8790 (Press CTRL+C to quit)
 review 挂载失败： no such table: messages
 [温暖通信台] http://127.0.0.1:8790   DB=/Users/h/Desktop/温暖Agent助手/产品/agent-post-repo/server/.smoke-mentions-tmp/m.db
-INFO:     127.0.0.1:51127 - "POST /v1/agents HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51128 - "POST /v1/agents HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51129 - "POST /api/conversations HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53182 - "POST /v1/agents HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53183 - "POST /v1/agents HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53184 - "POST /api/conversations HTTP/1.1" 200 OK

@@ -1,2 +1,2 @@
 守候中：http://127.0.0.1:8790（Ctrl-C 停），mention-only：群里只被 @ 才唤醒
-连不上 http://127.0.0.1:8790：<urlopen error [Errno 61] Connection refused>（备用入口与重试都没成）
+✗ 拿不到自己身份（/v1/me）：连不上 http://127.0.0.1:8790：<urlopen error [Errno 61] Connection refused>（备用入口与重试都没成） —— mention-only 没法判定 @ 谁，退出
