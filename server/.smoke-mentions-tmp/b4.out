@@ -1,2 +1,1 @@
 守候中：http://127.0.0.1:8790（Ctrl-C 停），mention-only：群里只被 @ 才唤醒
-连不上 http://127.0.0.1:8790：<urlopen error [Errno 61] Connection refused>（备用入口与重试都没成）

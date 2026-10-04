@@ -203,6 +203,26 @@ try:
 except Exception as _e:
     print("alerts 挂载失败：", _e)
 
+# 登录会话（一次性登录码 + cookie）：手机免粘 token
+try:
+    import session
+    if hasattr(session, "attach"):
+        session.attach(db=_db, lock=_db_lock, user_token=USER_TOKEN, q=q, q1=q1, ex=ex,
+                       new_id=new_id, now_iso=now_iso, new_token=lambda: secrets.token_urlsafe(24))
+    app.include_router(session.router)
+except Exception as _e:
+    print("session 挂载失败：", _e)
+
+# Web Push（手机锁屏可收）
+try:
+    import push
+    if hasattr(push, "attach"):
+        push.attach(db=_db, lock=_db_lock, user_token=USER_TOKEN, q=q, q1=q1, ex=ex,
+                    new_id=new_id, now_iso=now_iso, new_token=lambda: secrets.token_urlsafe(24))
+    app.include_router(push.router)
+except Exception as _e:
+    print("push 挂载失败：", _e)
+
 # 能力卡（/v1/cards）：每个岗位"会什么 + 现在在忙什么"
 try:
     import cards
@@ -1122,3 +1142,35 @@ if __name__ == "__main__":
 
     print("[温暖通信台] http://127.0.0.1:%d   DB=%s" % (PORT, DB_PATH))
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
+
+
+# ---------------------------------------------------------------- cookie → Bearer（手机免粘 token）
+# 手机用一次性登录码换到 warm_session cookie 之后，各模块（/chat、/console、/v1/*）仍只认 Bearer。
+# 这里加一层中间件：有 cookie 没 Bearer 时，按 session 里的账号换成对应的 token 注入请求头。
+try:
+    from starlette.middleware.base import BaseHTTPMiddleware as _BHM
+
+    class _CookieToAuth(_BHM):
+        async def dispatch(self, request, call_next):
+            try:
+                hdrs = {k.decode().lower() for k, _ in request.scope.get("headers", [])}
+                if "authorization" not in hdrs:
+                    sid = request.cookies.get("warm_session")
+                    if sid:
+                        row = q1("SELECT account_id, expires_at FROM sessions WHERE token = ?", (sid,))
+                        if row and (row["expires_at"] or "") > now_iso():
+                            aid = row["account_id"]
+                            tok = USER_TOKEN if aid in ("human", "") else None
+                            if tok is None:
+                                tr = q1("SELECT token FROM account_tokens WHERE account_id = ? LIMIT 1", (aid,))
+                                tok = tr["token"] if tr else None
+                            if tok:
+                                request.scope["headers"] = list(request.scope.get("headers", [])) +                                     [(b"authorization", b"Bearer " + tok.encode())]
+            except Exception as _e:
+                print("cookie→Bearer 中间件异常：", _e)
+            return await call_next(request)
+
+    app.add_middleware(_CookieToAuth)
+    print("已装载 cookie→Bearer 中间件（手机免粘 token）")
+except Exception as _e:
+    print("中间件装载失败：", _e)

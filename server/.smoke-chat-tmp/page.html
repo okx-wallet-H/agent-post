@@ -1,220 +1,4 @@
-"""chat —— 给人用的群聊界面（派 #12，2026-09-29）
-
-约定同 api_v1.py：main.py 启动时调用 ``chat.attach(**state)`` 注入
-db / lock / user_token / q / q1 / ex / new_id / now_iso / new_token，
-然后 ``app.include_router(chat.router)``。本文件不改 main.py，挂载由使用方完成
-（冒烟脚本 smoke_chat.sh 里就是这么挂的）。
-
-页面与接口：
-  GET  /chat        单页群聊界面（三栏 260 / 1fr / 240；<860px 收成单栏）
-  GET  /chat/state  页面数据：会话列表 + 当前会话消息流 + 成员 + 在线状态
-  POST /chat/send   以「我」或会话里某个 Agent 的身份发消息
-
-收消息：页面 JS 用长轮询 GET /v1/inbox?since=N&wait=55（等 55 秒，不每秒轮），
-被新消息唤醒后再刷 /chat/state 全量渲染。
-
-送达口径（messages 表没有送达列，按在线状态现算）：
-  Agent 发的 → 已送达；人发的 → 会话里有 Agent 离线（presence 超 120 秒）就
-  「排队中 · Agent 离线」，全在线（或会话里没有 Agent）才「已送达」。
-"""
-
-from __future__ import annotations
-
-import sqlite3
-from datetime import datetime, timezone
-from typing import Dict, List, Optional
-
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse, Response
-from pydantic import BaseModel
-
-router = APIRouter()
-
-_S: Dict[str, object] = {}
-
-
-def attach(**state) -> None:
-    """main.py 启动时调用（与 api_v1.attach 同签名，可重复调用）"""
-    _S.update(state)
-
-
-def _q(sql: str, args=()) -> List[sqlite3.Row]:
-    return _S["q"](sql, args)  # type: ignore[operator]
-
-
-def _q1(sql: str, args=()) -> Optional[sqlite3.Row]:
-    return _S["q1"](sql, args)  # type: ignore[operator]
-
-
-def _ex(sql: str, args=()) -> sqlite3.Cursor:
-    return _S["ex"](sql, args)  # type: ignore[operator]
-
-
-# 鉴权与多租户复用 api_v1 的一套（api_v1 的 me 顺带给 agent token 打心跳）
-import api_v1  # noqa: E402
-from api_v1 import me, _t  # noqa: E402
-
-ONLINE_TTL = 120  # 与 console 一致：presence.last_seen ≤ 120 秒算在线
-
-
-# ---------------------------------------------------------------- 在线状态
-
-def _ensure_presence() -> None:
-    _ex("CREATE TABLE IF NOT EXISTS presence (agent_id TEXT PRIMARY KEY, last_seen TEXT)")
-
-
-def _online_map() -> Dict[str, bool]:
-    """agent_id → 是否在线（没有 presence 记录 = 离线）"""
-    _ensure_presence()
-    now = datetime.now(timezone.utc)
-    out: Dict[str, bool] = {}
-    for r in _q("SELECT agent_id, last_seen FROM presence"):
-        try:
-            seen = datetime.fromisoformat(r["last_seen"])
-            out[r["agent_id"]] = (now - seen).total_seconds() <= ONLINE_TTL
-        except (ValueError, TypeError):
-            out[r["agent_id"]] = False
-    return out
-
-
-def _members_of(cid: str) -> List[str]:
-    return [r["agent_id"] for r in _q("SELECT agent_id FROM members WHERE conversation_id = ?", (cid,))]
-
-
-def _mentions_list(raw: Optional[str]) -> List[str]:
-    """messages.mentions 逗号分隔串 → 列表；all 归一成「全体」给前端显示。"""
-    out: List[str] = []
-    for m in (raw or "").split(","):
-        m = m.strip()
-        if not m:
-            continue
-        out.append("全体" if m == "all" else m)
-    return out
-
-
-def _msg_status(conv_id: str, from_kind: str, from_id: str, online: Dict[str, bool]) -> str:
-    """delivered | queued。Agent 发的算已送达；人发的看会话里有没有 Agent 离线。"""
-    if from_kind == "agent":
-        return "delivered"
-    for aid in _members_of(conv_id):
-        if aid == from_id:
-            continue
-        if not online.get(aid, False):
-            return "queued"
-    return "delivered"
-
-
-# ---------------------------------------------------------------- 数据接口
-
-def _conv_out(r: sqlite3.Row) -> Dict[str, object]:
-    last = _q1("SELECT m.text, m.created_at, m.from_kind, m.from_id FROM messages m"
-               " WHERE m.conversation_id = ? ORDER BY m.seq DESC LIMIT 1", (r["id"],))
-    last_from = ""
-    if last is not None:
-        last_from = "人" if last["from_kind"] == "human" else (
-            _q1("SELECT name FROM agents WHERE id = ?", (last["from_id"],)) or {"name": last["from_id"]})["name"]
-    return {
-        "id": r["id"],
-        "title": r["title"],
-        "kind": r["kind"],
-        "members": _members_of(r["id"]),
-        "last": {"text": last["text"], "from": last_from, "ts": last["created_at"]} if last is not None else None,
-    }
-
-
-@router.get("/chat/state")
-def chat_state(cid: Optional[str] = None,
-               who: Dict[str, str] = Depends(me)) -> Dict[str, object]:  # type: ignore[assignment]
-    """页面数据：会话列表 + 当前会话消息流 + 全部 Agent（含在线）+ 成员。"""
-    if who["kind"] != "human":
-        raise HTTPException(status_code=403, detail="群聊界面给人用，要人 token")
-
-    frag, fargs = _t()["owner_filter"](who, "c.owner_account")  # type: ignore[operator]
-    convs = [_conv_out(r) for r in
-             _q("SELECT c.* FROM conversations c WHERE 1=1%s ORDER BY c.created_at, c.id" % frag, tuple(fargs))]
-
-    online = _online_map()
-    agents = []
-    for r in _q("SELECT id, name FROM agents ORDER BY created_at"):
-        agents.append({"id": r["id"], "name": r["name"], "online": online.get(r["id"], False)})
-
-    msgs: List[Dict[str, object]] = []
-    handled: Dict[str, str] = {}
-    if cid:
-        # 成员「最近处理到哪」口径：该 Agent 在本会话最近一次自己发消息的时间
-        # （服务端暂无「已处理」记录，先以发言时间近似；有唤醒记录表后换数据源）
-        for r in _q("SELECT from_id, MAX(created_at) AS last FROM messages"
-                    " WHERE conversation_id = ? AND from_kind = 'agent' GROUP BY from_id", (cid,)):
-            handled[r["from_id"]] = r["last"]
-        for r in _q("SELECT * FROM messages WHERE conversation_id = ? ORDER BY seq LIMIT 500", (cid,)):
-            name = "人" if r["from_kind"] == "human" else (
-                _q1("SELECT name FROM agents WHERE id = ?", (r["from_id"],)) or {"name": r["from_id"]})["name"]
-            msgs.append({
-                "seq": r["seq"], "from_kind": r["from_kind"], "from_id": r["from_id"], "from_name": name,
-                "text": r["text"], "ts": r["created_at"],
-                "status": _msg_status(r["conversation_id"], r["from_kind"], r["from_id"], online),
-                "mentions": _mentions_list(r["mentions"]),
-            })
-
-    return {"conversations": convs, "agents": agents, "messages": msgs, "handled": handled,
-            "server_time": _S["now_iso"]()}  # type: ignore[index]
-
-
-class ChatSendIn(BaseModel):
-    conversation_id: str
-    text: str
-    as_agent_id: Optional[str] = None
-    client_msg_id: Optional[str] = None
-    mentions: Optional[List[str]] = None   # 显式点名（不传就从正文 @ 解析）
-
-
-@router.post("/chat/send")
-def chat_send(body: ChatSendIn, who: Dict[str, str] = Depends(me)) -> Dict[str, object]:  # type: ignore[assignment]
-    """以「我」或会话里某个 Agent 的身份发消息。幂等：同 client_msg_id 不重复投。"""
-    if who["kind"] != "human":
-        raise HTTPException(status_code=403, detail="群聊界面给人用，要人 token")
-    text = (body.text or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="内容不能空")
-    conv = _q1("SELECT * FROM conversations WHERE id = ?", (body.conversation_id,))
-    if conv is None:
-        raise HTTPException(status_code=404, detail="会话不存在：%s" % body.conversation_id)
-
-    from_kind, from_id = "human", "human"
-    if body.as_agent_id:
-        mids = _members_of(conv["id"])
-        if body.as_agent_id not in mids:
-            raise HTTPException(status_code=400, detail="这个 Agent 不在会话里：%s" % body.as_agent_id)
-        from_kind, from_id = "agent", body.as_agent_id
-
-    acct = _t()["billable_account"](who)  # type: ignore[operator]
-    _t()["quota_guard"](acct, "msg")  # type: ignore[operator]  额度不够 → 402
-
-    cmid = (body.client_msg_id or "").strip() or None
-    if cmid:
-        old = _q1("SELECT * FROM messages WHERE conversation_id = ? AND client_msg_id = ?", (conv["id"], cmid))
-        if old is not None:
-            return {"ok": True, "duplicate": True, "seq": old["seq"], "conversation_id": conv["id"]}
-    mid = _S["new_id"]("msg")  # type: ignore[operator]
-    mentions = api_v1.mentions_from(text, body.mentions)
-    try:
-        cur = _ex("INSERT INTO messages (id, conversation_id, from_kind, from_id, text, client_msg_id, created_at, mentions)"
-                  " VALUES (?,?,?,?,?,?,?,?)",
-                  (mid, conv["id"], from_kind, from_id, text, cmid, _S["now_iso"](), mentions))  # type: ignore[index]
-        seq = cur.lastrowid
-    except sqlite3.IntegrityError:
-        old = _q1("SELECT * FROM messages WHERE conversation_id = ? AND client_msg_id = ?", (conv["id"], cmid))
-        if old is None:
-            raise HTTPException(status_code=409, detail="写入冲突，请重试")
-        return {"ok": True, "duplicate": True, "seq": old["seq"], "conversation_id": conv["id"]}
-    _t()["record_usage"](acct, "msg", 1)  # type: ignore[operator]
-    return {"ok": True, "duplicate": False, "seq": seq, "conversation_id": conv["id"],
-            "status": _msg_status(conv["id"], from_kind, from_id, _online_map())}
-
-
-# ---------------------------------------------------------------- /chat 单页
-
-PAGE_HTML = """<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -419,7 +203,7 @@ a{color:var(--primary);text-decoration:none}
   // 支持挂在子路径下（例如 https://hub.hvip.one/chat 或 /hub/chat）：接口地址按当前页面路径前缀拼
   var BASE = (function () {
     var p = location.pathname;
-    if (p.charAt(p.length - 1) !== '/') p = p.replace(/\\/[^\\/]*$/, '/');
+    if (p.charAt(p.length - 1) !== '/') p = p.replace(/\/[^\/]*$/, '/');
     return p;
   })();
   var ST = null;        // 最近一次 /chat/state
@@ -478,10 +262,12 @@ a{color:var(--primary);text-decoration:none}
     var codeBlocks = [];
     // 代码块先切出保护（内容已转义，原样显示）
     s = s.replace(/```([\s\S]*?)```/g, function (_, code) {
-      codeBlocks.push(code.replace(/\n$/, ''));
+      codeBlocks.push(code.replace(/
+$/, ''));
       return 'B' + (codeBlocks.length - 1) + 'B';
     });
-    var lines = s.split('\n'), out = [], i = 0, listTag = null;
+    var lines = s.split('
+'), out = [], i = 0, listTag = null;
     var closeList = function () { if (listTag) { out.push('</' + listTag + '>'); listTag = null; } };
     var tblRow = function (l) { return /^\s*\|.*\|\s*$/.test(l); };
     var tblSep = function (l) { return /^\s*\|[\s:|-]+\|\s*$/.test(l) && l.indexOf('-') >= 0; };
@@ -529,9 +315,12 @@ a{color:var(--primary);text-decoration:none}
   var renderBubble = function (m) {
     var text = stripPrefix(m);
     if (text.trim() === '[静默]') { return '<div class="md-silent">[静默]</div>'; }
-    var lineCount = text.split('\n').length;
+    var lineCount = text.split('
+').length;
     if (lineCount > 18 && !expanded[m.seq]) {
-      var preview = text.split('\n').slice(0, 18).join('\n');
+      var preview = text.split('
+').slice(0, 18).join('
+');
       return '<div class="md-fold"><div class="md-preview">' + renderMd(preview) + '</div>' +
         '<button class="md-expand" type="button" data-seq="' + m.seq + '">展开全文（共 ' + lineCount + ' 行）</button></div>';
     }
@@ -829,81 +618,3 @@ a{color:var(--primary);text-decoration:none}
 </script>
 </body>
 </html>
-"""
-
-
-@router.get("/chat", response_class=HTMLResponse)
-def chat_page() -> HTMLResponse:
-    return HTMLResponse(PAGE_HTML)
-
-
-# ---------------------------------------------------------------- PWA 资源（#36）
-# manifest / Service Worker / 图标由本模块直接出（不加静态目录，单文件交付原则）
-
-MANIFEST_JSON = """{
-  "name": "AgentPost",
-  "short_name": "AgentPost",
-  "start_url": "./chat",
-  "display": "standalone",
-  "theme_color": "#1E3A5F",
-  "background_color": "#FAFAF8",
-  "icons": [
-    {"src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
-  ]
-}"""
-
-ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
-<rect width="192" height="192" rx="42" fill="#1E3A5F"/>
-<text x="96" y="122" font-family="-apple-system,'PingFang SC',sans-serif" font-size="84"
-  font-weight="700" fill="#FFFFFF" text-anchor="middle">A</text>
-</svg>"""
-
-SW_JS = """/* AgentPost 群聊 Service Worker（#36）：缓存壳；离线时页面提示「离线，恢复后自动同步」 */
-var CACHE = 'agentpost-chat-v1';
-var SHELL = ['./chat'];
-self.addEventListener('install', function (e) {
-  e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).then(function () {
-    return self.skipWaiting();
-  }));
-});
-self.addEventListener('activate', function (e) {
-  e.waitUntil(caches.keys().then(function (keys) {
-    return Promise.all(keys.filter(function (k) { return k !== CACHE; }).map(function (k) {
-      return caches.delete(k);
-    }));
-  }).then(function () { return self.clients.claim(); }));
-});
-self.addEventListener('fetch', function (e) {
-  if (e.request.method !== 'GET') { return; }
-  var url = new URL(e.request.url);
-  if (url.origin !== location.origin) { return; }          // 数据接口（api/v1 等）不缓存
-  if (url.pathname.indexOf('/chat') !== 0 && url.pathname !== '/chat') { return; }
-  e.respondWith(
-    fetch(e.request).then(function (res) {
-      var copy = res.clone();
-      caches.open(CACHE).then(function (c) { c.put(e.request, copy); });
-      return res;
-    }).catch(function () {
-      return caches.match(e.request).then(function (hit) { return hit || caches.match('./chat'); });
-    })
-  );
-});
-self.addEventListener('message', function (e) {
-  if (e.data === 'SKIP_WAITING') { self.skipWaiting(); }
-});
-"""
-
-
-@router.get("/manifest.webmanifest")
-def chat_manifest() -> Response:
-    return Response(MANIFEST_JSON, media_type="application/manifest+json")
-
-
-@router.get("/icon.svg")
-def chat_icon() -> Response:
-    return Response(ICON_SVG, media_type="image/svg+xml")
-
-
-@router.get("/sw.js")
-def chat_sw() -> Response:
-    return Response(SW_JS, media_type="application/javascript")

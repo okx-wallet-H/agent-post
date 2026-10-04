@@ -1,0 +1,11 @@
+{
+  "name": "AgentPost",
+  "short_name": "AgentPost",
+  "start_url": "./chat",
+  "display": "standalone",
+  "theme_color": "#1E3A5F",
+  "background_color": "#FAFAF8",
+  "icons": [
+    {"src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
+  ]
+}
