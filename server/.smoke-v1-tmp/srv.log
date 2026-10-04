@@ -1,19 +1,19 @@
-INFO:     Started server process [17727]
+INFO:     Started server process [29444]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8798 (Press CTRL+C to quit)
 [温暖通信台] http://127.0.0.1:8798   DB=/Users/h/Desktop/温暖Agent助手/产品/agent-post-repo/server/.smoke-v1-tmp/v1.db
-INFO:     127.0.0.1:64725 - "POST /v1/agents HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64726 - "POST /v1/send HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64727 - "POST /v1/send HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64728 - "POST /v1/send HTTP/1.1" 400 Bad Request
-INFO:     127.0.0.1:64729 - "GET /v1/inbox?since=0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64730 - "POST /v1/send HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64731 - "GET /v1/inbox?since=0 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64732 - "GET /v1/me HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64733 - "GET /v1/agents HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64734 - "GET /v1/inbox HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:49891 - "POST /v1/agents HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49892 - "POST /v1/send HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49893 - "POST /v1/send HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49894 - "POST /v1/send HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:49895 - "GET /v1/inbox?since=0 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49896 - "POST /v1/send HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49897 - "GET /v1/inbox?since=0 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49898 - "GET /v1/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49899 - "GET /v1/agents HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49900 - "GET /v1/inbox HTTP/1.1" 401 Unauthorized
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [17727]
+INFO:     Finished server process [29444]

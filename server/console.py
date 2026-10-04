@@ -439,6 +439,17 @@ input#tok:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba
 .item .head .fr,.item .head .to{font-weight:600;font-size:13px;color:var(--sub)}
 .item .head .fr.human,.item .head .to.human{color:var(--brand)}
 .item .txt{margin-top:4px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;font-size:16px;line-height:1.6}
+/* Markdown-lite 排版（与 /chat 同一套） */
+.md-p{margin:4px 0}
+.md-inline{font-family:var(--mono);font-size:.9em;background:rgba(28,27,26,.06);border-radius:4px;padding:1px 5px}
+.md-code{font-family:var(--mono);font-size:13px;line-height:1.6;background:rgba(28,27,26,.05);
+  border-radius:6px;padding:10px 12px;overflow-x:auto;white-space:pre;margin:6px 0}
+.md-quote{border-left:3px solid var(--online);background:rgba(45,106,79,.06);padding:4px 10px;margin:6px 0}
+.md-hr{border:0;border-top:1px solid var(--line);margin:8px 0}
+.md-list{margin:4px 0;padding-left:22px}
+.md-table{border-collapse:collapse;margin:6px 0;display:block;overflow-x:auto;max-width:100%}
+.md-table th,.md-table td{border:1px solid var(--line);padding:4px 10px;font-size:13.5px;white-space:nowrap}
+.md-silent{color:var(--weak);font-size:12px;line-height:1.5;text-align:center;margin:2px 0}
 .tag{display:inline-block;border-radius:6px;background:#F0EEEA;color:#6B6864;font-size:13px;
   line-height:1.5;padding:0 8px}
 .tl .empty,.roster .empty{color:var(--weak);font-size:13px;line-height:1.5;padding:8px 0}
@@ -524,6 +535,68 @@ footer{margin-top:32px;padding-top:16px;border-top:1px solid var(--line);font-si
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
     });
   };
+  // Markdown-lite：先全量转义再生成白名单标签（防 XSS）；
+  // 链接只认 http(s)://，javascript:/data: 不生成 <a>；与 /chat 同一套。
+  var mdLinkRe = /(^|[^\w("])(https?:\/\/[^\s<]+)/g;
+  var inlineMd = function (s) {
+    s = s.replace(mdLinkRe, function (_, pre, url) {
+      return pre + '<a href="' + url + '" target="_blank" rel="noopener">' + url + '</a>';
+    });
+    s = s.replace(/`([^`]+)`/g, '<code class="md-inline">$1</code>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^*])\*([^*\s][^*]*)\*(?!\*)/g, '$1<em>$2</em>');
+    s = s.replace(/(^|[\s(（])@(全体|[\w一-龥·\-]+)/g, '$1<span class="mention">@$2</span>');
+    return s;
+  };
+  var renderMd = function (src) {
+    var s = esc(src == null ? '' : src);
+    var codeBlocks = [];
+    s = s.replace(/```([\s\S]*?)```/g, function (_, code) {
+      codeBlocks.push(code.replace(/\n$/, ''));
+      return 'B' + (codeBlocks.length - 1) + 'B';
+    });
+    var lines = s.split('\n'), out = [], i = 0, listTag = null;
+    var closeList = function () { if (listTag) { out.push('</' + listTag + '>'); listTag = null; } };
+    var tblRow = function (l) { return /^\s*\|.*\|\s*$/.test(l); };
+    var tblSep = function (l) { return /^\s*\|[\s:|-]+\|\s*$/.test(l) && l.indexOf('-') >= 0; };
+    var cells = function (l) { return l.trim().split('|').slice(1, -1).map(function (c) { return c.trim(); }); };
+    for (i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (tblRow(line) && i + 1 < lines.length && tblSep(lines[i + 1])) {
+        closeList();
+        var h = '<table class="md-table"><thead><tr>' +
+          cells(line).map(function (c) { return '<th>' + inlineMd(c) + '</th>'; }).join('') +
+          '</tr></thead><tbody>';
+        i += 2;
+        for (; i < lines.length && tblRow(lines[i]); i++) {
+          h += '<tr>' + cells(lines[i]).map(function (c) { return '<td>' + inlineMd(c) + '</td>'; }).join('') + '</tr>';
+        }
+        h += '</tbody></table>';
+        out.push(h); i--; continue;
+      }
+      if (/^\s*\[静默\]\s*$/.test(line)) { closeList(); out.push('<div class="md-silent">[静默]</div>'); continue; }
+      if (/^\s*---+\s*$/.test(line)) { closeList(); out.push('<hr class="md-hr">'); continue; }
+      if (/^\s*&gt;\s?/.test(line)) {
+        closeList();
+        out.push('<blockquote class="md-quote">' + inlineMd(line.replace(/^\s*&gt;\s?/, '')) + '</blockquote>');
+        continue;
+      }
+      var lm = line.match(/^\s*([-*]|\d+\.)\s+(.*)$/);
+      if (lm) {
+        var tag = (lm[1] === '-' || lm[1] === '*') ? 'ul' : 'ol';
+        if (listTag && listTag !== tag) { closeList(); }
+        if (!listTag) { out.push('<' + tag + ' class="md-list">'); listTag = tag; }
+        out.push('<li>' + inlineMd(lm[2]) + '</li>');
+        continue;
+      }
+      closeList();
+      out.push(/^\s*$/.test(line) ? '<div class="md-p"></div>' : '<div class="md-p">' + inlineMd(line) + '</div>');
+    }
+    closeList();
+    return out.join('').replace(/B(\d+)B/g, function (_, n) {
+      return '<pre class="md-code"><code>' + codeBlocks[+n] + '</code></pre>';
+    });
+  };
   var pad = function (n) { return (n < 10 ? '0' : '') + n; };
   var hhmmss = function (ts) {
     var d = new Date(ts);
@@ -577,7 +650,7 @@ footer{margin-top:32px;padding-top:16px;border-top:1px solid var(--line);font-si
               '<span>→</span>' +
               '<span class="to' + (m.to === '人' ? ' human' : '') + '">' + esc(m.to) + '</span>' +
               (m.kind !== '消息' ? '<span class="tag">' + esc(m.kind) + '</span>' : '') +
-              '</div><div class="txt">' + esc(m.text) + '</div></li>';
+              '</div><div class="txt">' + renderMd(m.text) + '</div></li>';
       }
       $('tl').innerHTML = th;
     }
