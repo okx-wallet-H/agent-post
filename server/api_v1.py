@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from typing import Dict, List, Optional
 
@@ -34,17 +35,106 @@ _S: Dict[str, object] = {}
 def attach(**state) -> None:
     """main.py 在启动时调用：db / lock / user_token / q / q1 / ex / new_id / now_iso / is_member"""
     _S.update(state)
+    _ensure_mentions_schema(state.get("db"))
+
+
+# ---------------------------------------------------------------- mentions（#29 群聊 @ 唤醒）
+# messages.mentions 存逗号分隔的被点名者（@名字 或 @全体/@all = 全体）。
+# 幂等：列存在才加；触发器兜底 main.py 的 /api/conversations/{id}/messages 直插路径
+# （它不带 mentions 列，AFTER INSERT 触发器用 Python 函数从正文解析补上）。
+
+_ALL_MENTION = ("all", "全体", "everyone")
+
+
+def _mention_extract(text: Optional[str]) -> str:
+    """从正文解析 @名字 / @全体 / @all → 逗号分隔串。"""
+    if not text:
+        return ""
+    out: List[str] = []
+    for m in re.findall(r"@([^\s@，。,.!?]+)", text):
+        m = m.strip().strip("@").strip()
+        if m and m not in out:
+            out.append(m)
+    return ",".join(out)
+
+
+def mentions_from(text: str, explicit: Optional[List[str]] = None) -> str:
+    """合并显式 mentions 与正文 @：显式传了就只用显式（含 @全体 → all）。"""
+    if explicit:
+        names: List[str] = []
+        for x in explicit:
+            x = str(x).strip().strip("@").strip()
+            if x == "全体":
+                x = "all"
+            if x and x not in names:
+                names.append(x)
+        return ",".join(names)
+    return _mention_extract(text)
+
+
+def mentions_for(mentions: str, name: str, aid: str) -> bool:
+    """这条消息有没有点名 name/id（all/全体 = 点名所有人）。"""
+    if not mentions:
+        return False
+    for m in mentions.split(","):
+        m = m.strip()
+        if m in _ALL_MENTION or m == name or m == aid:
+            return True
+    return False
+
+
+_MENTIONS_READY = False
+
+
+def _ensure_mentions_schema(db) -> None:
+    """幂等：messages 加 mentions 列；注册 Python 解析函数；建触发器兜底直插路径。
+    注意 main.py 的 attach 在 db_init（建表）之前调用——所以除 attach 外，本模块的
+    _q/_q1/_ex 第一次跑时还会懒执行一次，保证表建好之后再补列。"""
+    global _MENTIONS_READY
+    if db is None:
+        return
+    try:
+        exists = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages'"
+        ).fetchone()
+        if exists is None:
+            return  # messages 表还没建（main.db_init 未跑）——等懒执行再补
+        cols = [r[1] for r in db.execute("PRAGMA table_info(messages)")]
+        if "mentions" not in cols:
+            db.execute("ALTER TABLE messages ADD COLUMN mentions TEXT")
+        try:
+            db.create_function("mention_extract", 1, _mention_extract)
+        except Exception:
+            pass  # 同名函数已注册过
+        db.execute(
+            """CREATE TRIGGER IF NOT EXISTS trg_messages_mentions
+               AFTER INSERT ON messages
+               WHEN NEW.mentions IS NULL
+               BEGIN
+                 UPDATE messages SET mentions = mention_extract(NEW.text) WHERE seq = NEW.seq;
+               END"""
+        )
+        db.commit()
+        _MENTIONS_READY = True
+    except Exception:
+        pass  # 加列/触发器失败不拦服务（mentions 功能降级为「无」）
 
 
 def _q(sql: str, args=()) -> List[sqlite3.Row]:
+    if not _MENTIONS_READY:
+        _ensure_mentions_schema(_S.get("db"))
     return _S["q"](sql, args)  # type: ignore[operator]
 
 
 def _q1(sql: str, args=()) -> Optional[sqlite3.Row]:
+    if not _MENTIONS_READY:
+        _ensure_mentions_schema(_S.get("db"))
     return _S["q1"](sql, args)  # type: ignore[operator]
 
 
 def _ex(sql: str, args=()) -> sqlite3.Cursor:
+    if not _MENTIONS_READY:
+        _ensure_mentions_schema(_S.get("db"))
     return _S["ex"](sql, args)  # type: ignore[operator]
 
 
@@ -130,6 +220,7 @@ class SendIn(BaseModel):
     to: str
     text: str
     client_msg_id: Optional[str] = None
+    mentions: Optional[List[str]] = None   # 显式点名（不传就从正文 @ 解析）
 
 
 class AgentIn(BaseModel):
@@ -299,10 +390,11 @@ def v1_send(body: SendIn, who: Dict[str, str] = Depends(me)) -> Dict[str, object
         if old is not None:
             return {"ok": True, "duplicate": True, "id": old["id"], "seq": old["seq"], "conversation_id": conv["id"]}
     mid = _S["new_id"]("msg")  # type: ignore[operator]
+    mentions = mentions_from(text, body.mentions)
     try:
-        cur = _ex("INSERT INTO messages (id, conversation_id, from_kind, from_id, text, client_msg_id, created_at)"
-                  " VALUES (?,?,?,?,?,?,?)",
-                  (mid, conv["id"], who["kind"], who["id"], text, cmid, _S["now_iso"]()))
+        cur = _ex("INSERT INTO messages (id, conversation_id, from_kind, from_id, text, client_msg_id, created_at, mentions)"
+                  " VALUES (?,?,?,?,?,?,?,?)",
+                  (mid, conv["id"], who["kind"], who["id"], text, cmid, _S["now_iso"](), mentions))
         seq = cur.lastrowid
     except sqlite3.IntegrityError:
         old = _q1("SELECT * FROM messages WHERE conversation_id = ? AND client_msg_id = ?", (conv["id"], cmid))
@@ -327,9 +419,9 @@ def v1_inbox(since: int = 0, limit: int = 200, wait: int = 0,
         while True:
             got = _inbox_rows(since, limit, who)
             if got or time.time() >= deadline:
-                return _inbox_out(got, since)
+                return _inbox_out(got, since, who)
             time.sleep(0.5)
-    return _inbox_out(_inbox_rows(since, limit, who), since)
+    return _inbox_out(_inbox_rows(since, limit, who), since, who)
 
 
 def _inbox_rows(since: int, limit: int, who: Dict[str, str]) -> List[sqlite3.Row]:
@@ -346,15 +438,24 @@ def _inbox_rows(since: int, limit: int, who: Dict[str, str]) -> List[sqlite3.Row
               (who["id"], since, who["id"]) + tuple(fargs) + (min(limit, 500),))
 
 
-def _inbox_out(rows: List[sqlite3.Row], since: int) -> Dict[str, object]:
+def _inbox_out(rows: List[sqlite3.Row], since: int, who: Optional[Dict[str, str]] = None) -> Dict[str, object]:
+    """每条消息带 wake：True = 对当前收件人是「待处理」（单聊全 True；群里被 @/全体 True），
+    False = 「已看未唤醒」（群消息没被点名）——守候和界面都用这个字段判定。"""
     out = []
     for r in rows:
         from_name = "人" if r["from_kind"] == "human" else (_q1("SELECT name FROM agents WHERE id = ?", (r["from_id"],)) or {"name": r["from_id"]})["name"]
-        conv = _q1("SELECT title FROM conversations WHERE id = ?", (r["conversation_id"],))
+        conv = _q1("SELECT title, kind FROM conversations WHERE id = ?", (r["conversation_id"],))
+        mentions = r["mentions"] if "mentions" in r.keys() else ""
+        wake = True
+        if who is not None and who["kind"] == "agent" and conv and conv["kind"] == "group":
+            wake = mentions_for(mentions, who["name"], who["id"])
         out.append({"seq": r["seq"], "from": from_name, "from_kind": r["from_kind"],
                     "text": r["text"], "ts": r["created_at"],
                     "conversation": conv["title"] if conv else r["conversation_id"],
-                    "conversation_id": r["conversation_id"]})
+                    "conversation_id": r["conversation_id"],
+                    "conversation_kind": conv["kind"] if conv else "",
+                    "mentions": [m for m in (mentions or "").split(",") if m],
+                    "wake": wake})
     # 注意：不能把 since 原样回显成 latest（客户端把它存成游标后会永远收不到消息且不报错）
     # 真实最大 seq 由库决定（不受 since 影响）
     head = _q1("SELECT MAX(seq) AS m FROM messages")

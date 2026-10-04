@@ -51,6 +51,7 @@ def _ex(sql: str, args=()) -> sqlite3.Cursor:
 
 
 # 鉴权与多租户复用 api_v1 的一套（api_v1 的 me 顺带给 agent token 打心跳）
+import api_v1  # noqa: E402
 from api_v1 import me, _t  # noqa: E402
 
 ONLINE_TTL = 120  # 与 console 一致：presence.last_seen ≤ 120 秒算在线
@@ -145,6 +146,7 @@ class ChatSendIn(BaseModel):
     text: str
     as_agent_id: Optional[str] = None
     client_msg_id: Optional[str] = None
+    mentions: Optional[List[str]] = None   # 显式点名（不传就从正文 @ 解析）
 
 
 @router.post("/chat/send")
@@ -175,10 +177,11 @@ def chat_send(body: ChatSendIn, who: Dict[str, str] = Depends(me)) -> Dict[str, 
         if old is not None:
             return {"ok": True, "duplicate": True, "seq": old["seq"], "conversation_id": conv["id"]}
     mid = _S["new_id"]("msg")  # type: ignore[operator]
+    mentions = api_v1.mentions_from(text, body.mentions)
     try:
-        cur = _ex("INSERT INTO messages (id, conversation_id, from_kind, from_id, text, client_msg_id, created_at)"
-                  " VALUES (?,?,?,?,?,?,?)",
-                  (mid, conv["id"], from_kind, from_id, text, cmid, _S["now_iso"]()))  # type: ignore[index]
+        cur = _ex("INSERT INTO messages (id, conversation_id, from_kind, from_id, text, client_msg_id, created_at, mentions)"
+                  " VALUES (?,?,?,?,?,?,?,?)",
+                  (mid, conv["id"], from_kind, from_id, text, cmid, _S["now_iso"](), mentions))  # type: ignore[index]
         seq = cur.lastrowid
     except sqlite3.IntegrityError:
         old = _q1("SELECT * FROM messages WHERE conversation_id = ? AND client_msg_id = ?", (conv["id"], cmid))
