@@ -203,6 +203,16 @@ try:
 except Exception as _e:
     print("alerts 挂载失败：", _e)
 
+# 能力卡（/v1/cards）：每个岗位"会什么 + 现在在忙什么"
+try:
+    import cards
+    if hasattr(cards, "attach"):
+        cards.attach(db=_db, lock=_db_lock, user_token=USER_TOKEN, q=q, q1=q1, ex=ex,
+                     new_id=new_id, now_iso=now_iso, new_token=lambda: secrets.token_urlsafe(24))
+    app.include_router(cards.router)
+except Exception as _e:
+    print("cards 挂载失败：", _e)
+
 # 帮助页（/help）：把接入文档变成一页
 try:
     import help_page
